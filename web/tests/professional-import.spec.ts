@@ -3,13 +3,20 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 
 test('Iron Man imports its complete chart, original symbols, and two-strand palette', async ({ page, request }) => {
+  test.slow();
   const source = path.resolve('../docs/sample-patterns/Iron Man (1).pdf');
   test.skip(!existsSync(source), 'User-provided PDF is absent; synthetic importer regressions still run.');
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await page.getByRole('button', { name: 'Import a pattern', exact: true }).click();
-  await page.locator('input[type=file]').setInputFiles(source);
+  // Parsing and saving this 48-page chart can exceed the default assertion timeout on CI.
+  const [importResponse] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/imports') && response.request().method() === 'POST', { timeout: 90_000 }),
+    page.locator('input[type=file]').setInputFiles(source),
+  ]);
+  expect(importResponse.ok(), 'Iron Man PDF import succeeded').toBeTruthy();
+  await importResponse.finished();
   await expect(page.getByRole('heading', { name: 'Iron Man (1)', exact: true })).toBeVisible();
   await expect(page.locator('.workspace-title')).toContainText('450 × 450');
   await expect(page.locator('.workspace-title')).toContainText('63 colors');

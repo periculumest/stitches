@@ -1,3 +1,5 @@
+> Historical phase 1 document. For the current PostgreSQL release, see [phase 2 decisions](<phase 2/IMPLEMENTATION-DECISIONS.md>) and [preproduction setup](<phase 2/PREPROD-READINESS.md>). SQLite recovery commands below apply only to the old MVP.
+
 # MVP implementation decisions
 
 Updated: 2026-09-07. These notes supplement the original specification pack and record disagreements, pragmatic scope choices, and limitations. The original product priorities remain intact.

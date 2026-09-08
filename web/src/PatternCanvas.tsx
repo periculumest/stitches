@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PatternData, Region, Stitch, Thread } from './types';
+import { components, effectiveCode } from './types';
 
 export interface View { x: number; y: number; cell: number }
 interface Props {
@@ -87,11 +88,14 @@ export function PatternCanvas({ data, catalog, completed = new Set(), substituti
       if (Math.max(s.x, s.endX ?? s.x) < visible.minX - 1 || Math.min(s.x, s.endX ?? s.x) > visible.maxX + 1 || Math.max(s.y, s.endY ?? s.y) < visible.minY - 1 || Math.min(s.y, s.endY ?? s.y) > visible.maxY + 1) continue;
       const d = definitions.get(s.definitionId); if (!d) continue;
       const match = matches(s); if (!match && isolate) continue;
-      const color = threads.get(substitutions[d.threadCode] || d.threadCode)?.displayColor || '#b7b0a6';
+      const colors = components(d).map(c => threads.get(effectiveCode(c, substitutions))?.displayColor || '#b7b0a6');
+      const color = colors[0];
       const done = paint.has(s.id) && gesture.current ? gesture.current.complete : completed.has(s.id);
       ctx.globalAlpha = !match ? .13 : !inArea(s) ? .3 : done && !preview ? .25 : 1;
       const x = ox + s.x * cell; const y = oy + s.y * cell;
-      ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.5, cell * .14);
+      const stripes = ctx.createLinearGradient(x, y, x + cell, y + cell);
+      colors.forEach((color, i) => { stripes.addColorStop(i / colors.length, color); stripes.addColorStop((i + 1) / colors.length, color); });
+      ctx.fillStyle = colors.length > 1 ? stripes : color; ctx.strokeStyle = colors.length > 1 ? stripes : color; ctx.lineWidth = Math.max(1.5, cell * .14);
       if (d.stitchType === 'Backstitch') { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ox + (s.endX ?? s.x + 1) * cell, oy + (s.endY ?? s.y + 1) * cell); ctx.stroke(); }
       else if (d.stitchType === 'FrenchKnot' || d.stitchType === 'Bead') { ctx.beginPath(); ctx.ellipse(x + cell / 2, y + cell / 2, cell * .24, cell * (d.stitchType === 'Bead' ? .36 : .24), -.5, 0, Math.PI * 2); ctx.fill(); }
       else if (d.stitchType === 'HalfCross') { ctx.beginPath(); ctx.moveTo(x + cell * .15, y + cell * .85); ctx.lineTo(x + cell * .85, y + cell * .15); ctx.stroke(); }
@@ -100,6 +104,7 @@ export function PatternCanvas({ data, catalog, completed = new Set(), substituti
       if (cell >= 12 && !preview) {
         const rgb = color.slice(1).match(/.{2}/g)!.map(c => parseInt(c, 16));
         ctx.fillStyle = rgb[0] * .299 + rgb[1] * .587 + rgb[2] * .114 > 145 ? '#252b25' : '#fffef9';
+        if (colors.length > 1) { ctx.fillStyle = '#fffcf5'; ctx.fillRect(x + cell * .2, y + cell * .15, cell * .6, cell * .7); ctx.fillStyle = '#252b25'; }
         const glyph = d.symbolGlyph, path = glyphPaths.get(d.id);
         if (glyph && path) {
           const scale = cell * .82 / Math.max(glyph.width, glyph.height);

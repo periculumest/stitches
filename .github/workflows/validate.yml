@@ -1,0 +1,65 @@
+name: Validate
+on: [push, pull_request]
+jobs:
+  phase2:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_USER: stitch
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U stitch -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      STITCH_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=stitch;Password=ci-only
+      STITCH_BROWSER_POSTGRES: Host=127.0.0.1;Port=5432;Database=stitch_test_browser_ci;Username=stitch;Password=ci-only
+      ConnectionStrings__StitchHelper: Host=127.0.0.1;Port=5432;Database=stitch_test_browser_ci;Username=stitch;Password=ci-only
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://127.0.0.1:5068
+      Storage__LocalRoot: /tmp/stitch-private-ci
+      STITCH_TEST_URL: http://127.0.0.1:5068
+      STITCH_FIXTURE_PATH: ${{ github.workspace }}/artifacts/structured-sampler.pdf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: npm run build --prefix web
+      - run: dotnet test tests/StitchHelper.Tests.csproj -c Release
+      - run: dotnet run --project tests/TestSupport -c Release -- artifacts/browser-auth.json
+      - run: npx playwright install --with-deps chrome
+        working-directory: web
+      - name: Browser tests and jobs
+        shell: bash
+        run: |
+          cd server
+          dotnet bin/Release/net8.0/StitchHelper.dll > ../artifacts/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          cd ..
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:5068/health/ready; then break; fi
+            sleep 1
+          done
+          npm test --prefix web
+          dotnet server/bin/Release/net8.0/StitchHelper.dll --backup daily
+          dotnet server/bin/Release/net8.0/StitchHelper.dll --backup weekly
+      - name: Container build
+        run: docker build --build-arg APP_VERSION=0.2.0-ci -t stitch-helper:ci .
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: validation-failures
+          path: |
+            web/test-results
+            artifacts/server.log

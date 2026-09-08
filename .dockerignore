@@ -1,0 +1,17 @@
+.git
+.nuget
+.data
+artifacts
+docs
+tests
+**/node_modules
+**/bin
+**/obj
+**/test-results
+**/playwright-report
+server/wwwroot
+.env
+*.pfx
+*.pem
+*.key
+**/appsettings.*.local.json

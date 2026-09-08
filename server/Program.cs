@@ -1,95 +1,227 @@
+using System.Security.Cryptography.X509Certificates;
+using Google.Cloud.Storage.V1;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using StitchHelper;
 
-if (args.Length >= 3 && args[0] == "--restore")
-{
-    BackupService.Restore(args[1], args[2]);
-    Console.WriteLine($"Backup verified and restored to {Path.GetFullPath(args[2])}"); return;
-}
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.Logging.ClearProviders(); builder.Logging.AddJsonConsole();
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning); // OAuth callback query values are private.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 builder.WebHost.UseUrls(builder.Configuration["urls"] ?? "http://127.0.0.1:5057");
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 50 * 1024 * 1024);
-var root = builder.Configuration["STITCH_DATA_DIR"] ?? Path.Combine(builder.Environment.ContentRootPath, "..", ".data");
-builder.Services.AddSingleton<IRepository>(new Repository(root));
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 50 * 1024 * 1024);
+var configuration = builder.Configuration;
+var maxUploadMb = configuration.GetValue("Import:MaxMegabytes", 45);
+if (maxUploadMb is < 1 or > 45) throw new InvalidOperationException("Import:MaxMegabytes must be between 1 and 45.");
+string Required(string key) => !string.IsNullOrWhiteSpace(configuration[key]) ? configuration[key]! : throw new InvalidOperationException($"Required configuration is missing: {key}");
+var connection = Required("ConnectionStrings:StitchHelper");
+builder.Services.AddDbContext<StitchDbContext>(o => o.UseNpgsql(connection));
+if (args.Contains("--migrate"))
+{
+    await using var db = new StitchDbContext(new DbContextOptionsBuilder<StitchDbContext>().UseNpgsql(connection).Options);
+    await db.Database.OpenConnectionAsync();
+    await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_lock(81764001)");
+    try { await db.Database.MigrateAsync(); db.SeedCatalog(); }
+    finally { await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_unlock(81764001)"); await db.Database.CloseConnectionAsync(); }
+    Console.WriteLine("Migrations and reference catalog applied."); return;
+}
+var local = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
+var publicUrl = configuration["PublicBaseUrl"];
+Uri? publicOrigin = null;
+if (publicUrl is not null && (!Uri.TryCreate(publicUrl, UriKind.Absolute, out publicOrigin) || publicOrigin.AbsolutePath != "/" || publicOrigin.Query != "" || publicOrigin.Fragment != "" || publicOrigin.UserInfo != "")) throw new InvalidOperationException("PublicBaseUrl must be an absolute origin without a path, query, or credentials.");
+if (!local && publicOrigin?.Scheme != "https") throw new InvalidOperationException("Production requires an HTTPS PublicBaseUrl.");
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+builder.Services.AddScoped<IRepository, Repository>();
 builder.Services.AddSingleton<IPatternImporter, PdfImporter>();
-builder.Services.AddSingleton<BackupService>();
-builder.Services.AddHostedService(p => p.GetRequiredService<BackupService>());
+builder.Services.AddScoped<BackupService>();
+builder.Services.AddScoped<GoogleIdentityResolver>();
+builder.Services.AddIdentity<ApplicationUser, IdentityRole<Guid>>(o => { o.User.RequireUniqueEmail = false; })
+    .AddEntityFrameworkStores<StitchDbContext>().AddDefaultTokenProviders();
+builder.Services.ConfigureApplicationCookie(o =>
+{
+    o.Cookie.Name = local ? "StitchHelper.Session" : "__Host-StitchHelper.Session";
+    o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = local ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+    o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.Path = "/";
+    o.ExpireTimeSpan = TimeSpan.FromDays(30); o.SlidingExpiration = true;
+    o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+    o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
+});
+var googleId = configuration["Authentication:Google:ClientId"];
+if (!local) { Required("Authentication:Google:ClientId"); Required("Authentication:Google:ClientSecret"); }
+if (!string.IsNullOrWhiteSpace(googleId)) builder.Services.AddAuthentication().AddGoogle(o =>
+{
+    o.ClientId = googleId; o.ClientSecret = Required("Authentication:Google:ClientSecret");
+    o.SignInScheme = IdentityConstants.ExternalScheme; o.SaveTokens = false; o.CallbackPath = "/signin-google";
+    o.Events.OnRemoteFailure = c => { c.HandleResponse(); c.Response.Redirect("/?signin=failed"); return Task.CompletedTask; };
+});
+builder.Services.AddAuthorization();
+builder.Services.AddAntiforgery(o =>
+{
+    o.HeaderName = "X-CSRF-TOKEN";
+    o.Cookie.Name = local ? "StitchHelper.Csrf" : "__Host-StitchHelper.Csrf";
+    o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = local ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+    o.Cookie.SameSite = SameSiteMode.Strict;
+});
+var protection = builder.Services.AddDataProtection().SetApplicationName("StitchHelper").PersistKeysToDbContext<StitchDbContext>();
+var certificate = configuration["DataProtection:CertificateBase64"];
+if (!local && string.IsNullOrWhiteSpace(certificate)) throw new InvalidOperationException("Production requires DataProtection:CertificateBase64 to encrypt the shared key ring.");
+if (!string.IsNullOrWhiteSpace(certificate))
+{
+    var cert = new X509Certificate2(Convert.FromBase64String(certificate), configuration["DataProtection:CertificatePassword"], X509KeyStorageFlags.EphemeralKeySet);
+    if (!cert.HasPrivateKey) throw new InvalidOperationException("Data protection requires a certificate with its private key.");
+    protection.ProtectKeysWithCertificate(cert);
+}
+var storage = configuration["Storage:Provider"] ?? (local ? "Local" : "");
+if (storage == "Local" && local)
+{
+    var root = Path.GetFullPath(configuration["Storage:LocalRoot"] ?? Path.Combine(builder.Environment.ContentRootPath, "..", ".data", "private"));
+    var webRoot = Path.GetFullPath(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"));
+    if (root.Equals(webRoot, StringComparison.OrdinalIgnoreCase) || root.StartsWith(webRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Private storage must be outside wwwroot.");
+    builder.Services.AddSingleton<IPatternAssetStore>(new LocalPatternAssetStore(root));
+    builder.Services.AddSingleton<IBackupArtifactStore>(new LocalBackupArtifactStore(root));
+}
+else if (storage == "GoogleCloudStorage")
+{
+    var patternBucket = Required("Storage:PatternBucketOrContainer"); var backupBucket = Required("Storage:BackupBucketOrContainer");
+    builder.Services.AddSingleton(_ => StorageClient.Create()); // Application Default Credentials / workload identity.
+    builder.Services.AddSingleton<IPatternAssetStore>(s => new GooglePatternAssetStore(s.GetRequiredService<StorageClient>(), patternBucket));
+    builder.Services.AddSingleton<IBackupArtifactStore>(s => new GoogleBackupArtifactStore(s.GetRequiredService<StorageClient>(), backupBucket));
+}
+else throw new InvalidOperationException("Production requires Storage:Provider=GoogleCloudStorage and durable private buckets. Local storage is Development/Testing only.");
 builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o => o.SerializerOptions.PropertyNamingPolicy = Json.Options.PropertyNamingPolicy);
 var app = builder.Build();
+if (storage == "GoogleCloudStorage")
+{
+    var client = app.Services.GetRequiredService<StorageClient>();
+    foreach (var bucketName in new[] { Required("Storage:PatternBucketOrContainer"), Required("Storage:BackupBucketOrContainer") }.Distinct())
+    {
+        var bucket = await client.GetBucketAsync(bucketName);
+        if (bucket.IamConfiguration?.PublicAccessPrevention != "enforced" || bucket.IamConfiguration?.UniformBucketLevelAccess?.Enabled != true)
+            throw new InvalidOperationException("Private storage requires enforced public access prevention and uniform bucket-level access on both configured buckets.");
+    }
+}
+if (args.Contains("--backup"))
+{
+    var position = Array.IndexOf(args, "--backup");
+    var kind = args.ElementAtOrDefault(position + 1);
+    if (kind is not ("daily" or "weekly")) throw new InvalidOperationException("Usage: --backup daily|weekly");
+    using var scope = app.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<StitchDbContext>();
+    var owners = await db.Users.Select(x => x.Id).ToListAsync(); var failed = false;
+    foreach (var owner in owners)
+    {
+        using var jobScope = app.Services.CreateScope();
+        try { await jobScope.ServiceProvider.GetRequiredService<BackupService>().Retain(owner, kind, DateTimeOffset.UtcNow); }
+        catch (Exception ex) { failed = true; app.Logger.LogError(ex, "Backup {Kind} failed for user {UserId}", kind, owner); }
+    }
+    Environment.ExitCode = failed ? 1 : 0; return;
+}
+// One canonical public origin makes redirects safe behind any HTTPS ingress, without trusting forwarded headers.
 app.Use(async (context, next) =>
 {
-    try
+    if (publicOrigin is not null) { context.Request.Scheme = publicOrigin.Scheme; context.Request.Host = new HostString(publicOrigin.Authority); }
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "same-origin";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    if (!local) context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000";
+    if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")) context.Response.Headers.CacheControl = "no-store";
+    try { await next(); }
+    catch (Exception ex) when (!context.Response.HasStarted)
     {
-        // A local single-user service: reject browser writes from other origins, including DNS rebinding.
-        var host = context.Request.Host.Host;
-        if (host is not ("127.0.0.1" or "localhost" or "::1")) throw new UserError("Use localhost to open Stitch Helper.", 403);
-        if (context.Request.Method is not ("GET" or "HEAD" or "OPTIONS"))
-        {
-            var origin = context.Request.Headers.Origin.ToString();
-            if (origin.Length > 0 && (!Uri.TryCreate(origin, UriKind.Absolute, out var uri) || uri.Host is not ("127.0.0.1" or "localhost" or "::1") || (uri.Port != context.Request.Host.Port && uri.Port != 5173))) throw new UserError("This request did not come from Stitch Helper.", 403);
-        }
-        await next();
-    }
-    catch (Exception ex)
-    {
-        var status = ex is UserError ue ? ue.Status : ex is BadHttpRequestException ? 400 : 500;
-        if (status == 500) app.Logger.LogError(ex, "Request failed");
+        var status = ex is UserError error ? error.Status : ex is AntiforgeryValidationException ? 400 : ex is DbUpdateConcurrencyException ? 409 : ex is BadHttpRequestException ? 400 : 500;
+        if (status == 500) app.Logger.LogError(ex, "Request {TraceId} failed", context.TraceIdentifier);
         context.Response.StatusCode = status;
-        await context.Response.WriteAsJsonAsync(new { error = status == 500 ? "Something went wrong. Your last saved work is safe. Try again or check the server log." : ex.Message });
+        await context.Response.WriteAsJsonAsync(new { error = status == 500 ? "Something went wrong. Your last saved work is safe. Please try again." : ex is AntiforgeryValidationException ? "Your session verification expired. Reload and try again." : ex is DbUpdateConcurrencyException ? Repository.Conflict().Message : ex.Message });
     }
 });
 app.UseDefaultFiles(); app.UseStaticFiles();
-object View(Project p) => new { p.Id, p.PatternId, p.Name, p.Status, p.Data, p.Completed, p.Substitutions, p.Milestones, p.WorkingArea, p.Revision, p.UpdatedAt, sourceAvailable = app.Services.GetRequiredService<IRepository>().GetPattern(p.PatternId).SourceFile is not null, canUndo = p.Undo.Count > 0, canRedo = p.Redo.Count > 0 };
-app.MapGet("/api/health", (BackupService backup) => new { status = "ok", backupError = backup.LastError });
-app.MapGet("/api/projects", (IRepository repo) => repo.List().Select(p => new { p.Id, p.Name, p.Status, p.UpdatedAt, width = p.Data.Width, height = p.Data.Height, total = p.Data.Stitches.Count, completed = p.Completed.Count, colors = p.Data.Definitions.Count, preview = p.Data.Stitches.Count <= 15000 ? p.Data : null }));
-app.MapGet("/api/projects/{id}", (string id, IRepository repo) => View(repo.Get(id)));
-app.MapPost("/api/projects/sample", (IRepository repo, int? size) => View(repo.Create(SamplePattern.Create(Math.Clamp(size ?? 100, 20, 1000)), status: "active")));
-app.MapPost("/api/projects/{id}/duplicate", (string id, IRepository repo) => { var original = repo.Get(id); return View(repo.Create(repo.GetPattern(original.PatternId), original.Name + " · new start", "audit")); });
-app.MapPost("/api/projects/{id}/commands", (string id, Command command, IRepository repo) =>
+app.UseAuthentication(); app.UseAuthorization();
+app.Use(async (context, next) =>
 {
-    lock (repo.Gate) { var p = repo.Get(id); ProjectCommands.Execute(p, command, repo.Catalog()); repo.Save(p, command.Revision); return View(p); }
-});
-app.MapDelete("/api/projects/{id}", (string id, IRepository repo, BackupService backup) => { backup.Create(); repo.Delete(id); return Results.NoContent(); });
-app.MapGet("/api/projects/{id}/source", (string id, IRepository repo) =>
-{
-    var source = repo.GetPattern(repo.Get(id).PatternId).SourceFile;
-    return source is null ? Results.NotFound() : Results.File(Path.Combine(repo.Root, "sources", source), "application/pdf", enableRangeProcessing: true);
-});
-app.MapPost("/api/imports", async (HttpRequest request, IRepository repo, IPatternImporter importer) =>
-{
-    var form = await request.ReadFormAsync(); var file = form.Files.GetFile("file") ?? throw new UserError("Choose a PDF to import.");
-    if (file.Length == 0 || file.Length > 45 * 1024 * 1024 || !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) throw new UserError("Choose a PDF smaller than 45 MB.");
-    var id = Guid.NewGuid().ToString("N"); var name = id + ".pdf"; var path = Path.Combine(repo.Root, "sources", name);
-    // Retention and candidate persistence share the backup lock, keeping every backup self-contained.
-    using var memory = new MemoryStream(); await file.CopyToAsync(memory);
-    if (!System.Text.Encoding.ASCII.GetString(memory.ToArray().Take(1024).ToArray()).Contains("%PDF-")) throw new UserError("This file does not appear to be a PDF.");
-    lock (repo.Gate)
+    if (context.Request.Method is not ("GET" or "HEAD" or "OPTIONS") &&
+        (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")))
     {
-        File.WriteAllBytes(path, memory.ToArray());
-        PatternData data;
+        if (context.User.Identity?.IsAuthenticated != true) { context.Response.StatusCode = 401; return; }
+        await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
+    }
+    await next();
+});
+app.MapStitchAuthentication();
+app.MapGet("/health/live", () => new { status = "live" }).AllowAnonymous();
+app.MapGet("/health/ready", async (StitchDbContext db) =>
+{
+    try { return await db.Database.CanConnectAsync() && !(await db.Database.GetPendingMigrationsAsync()).Any() && await db.Catalog.AnyAsync() ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503); }
+    catch { return Results.StatusCode(503); }
+}).AllowAnonymous();
+object View(Project p, IRepository repo) => new { p.Id, p.PatternId, p.Name, p.Status, p.Data, p.Completed, p.Substitutions, p.Milestones, p.WorkingArea, p.Revision, p.DataRevision, p.UpdatedAt, sourceAvailable = repo.GetPattern(p.PatternId).SourceFile is not null, canUndo = p.Undo.Count > 0, canRedo = p.Redo.Count > 0 };
+object State(Project p) => new { p.Id, p.Name, p.Status, p.Completed, p.Substitutions, p.Milestones, p.WorkingArea, p.Revision, p.DataRevision, p.UpdatedAt, canUndo = p.Undo.Count > 0, canRedo = p.Redo.Count > 0 };
+var api = app.MapGroup("/api").RequireAuthorization();
+api.MapGet("/capabilities", () => new { maxUploadMegabytes = maxUploadMb });
+api.MapGet("/projects", (IRepository repo) => repo.List().Select(p => new { p.Id, p.Name, p.Status, p.UpdatedAt, width = p.Data.Width, height = p.Data.Height, total = p.Data.Stitches.Count, completed = p.Completed.Count, colors = p.Data.Definitions.Count, preview = p.Data.Stitches.Count <= 15000 ? p.Data : null }));
+api.MapGet("/projects/{id}", (string id, IRepository repo) => View(repo.Get(id), repo));
+api.MapGet("/projects/{id}/state", (string id, long? revision, IRepository repo) => { var p = repo.GetState(id, revision); return p is null ? Results.NoContent() : Results.Ok(State(p)); });
+api.MapGet("/patterns/{id}", (string id, IRepository repo) => repo.GetPattern(id));
+api.MapPost("/patterns/{id}/projects", (string id, IRepository repo) => View(repo.Create(repo.GetPattern(id)), repo));
+api.MapPost("/projects/sample", (IRepository repo, int? size) => View(repo.Create(SamplePattern.Create(Math.Clamp(size ?? 100, 20, 1000)), status: "active"), repo));
+api.MapPost("/projects/{id}/duplicate", (string id, IRepository repo) => { var original = repo.Get(id); return View(repo.Create(repo.GetPattern(original.PatternId), original.Name + " · new start", "audit"), repo); });
+api.MapPost("/projects/{id}/commands", (string id, Command command, IRepository repo) => View(repo.Execute(id, command), repo));
+api.MapPost("/projects/{id}/progress", (string id, ProgressBatch batch, IRepository repo) => State(repo.Progress(id, batch)));
+api.MapDelete("/projects/{id}", (string id, IRepository repo) => { repo.Delete(id); return Results.NoContent(); });
+api.MapGet("/projects/{id}/source", async (string id, IRepository repo, IPatternAssetStore store, CancellationToken ct) =>
+{
+    var source = repo.GetSource(id); return Results.File(await store.Read(source.StorageKey, ct), source.MediaType, enableRangeProcessing: true);
+});
+api.MapPost("/imports", async (HttpRequest request, IRepository repo, IPatternImporter importer, IPatternAssetStore store, CancellationToken ct) =>
+{
+    var form = await request.ReadFormAsync(ct); var file = form.Files.GetFile("file") ?? throw new UserError("Choose a PDF to import.");
+    if (file.Length == 0 || file.Length > maxUploadMb * 1024 * 1024 || !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) throw new UserError($"Choose a PDF no larger than {maxUploadMb} MB.");
+    using var memory = new MemoryStream(); await file.CopyToAsync(memory, ct); var bytes = memory.ToArray();
+    if (!System.Text.Encoding.ASCII.GetString(bytes.Take(1024).ToArray()).Contains("%PDF-")) throw new UserError("This file does not appear to be a PDF.");
+    var originalName = Path.GetFileName(file.FileName.Replace('\\', '/')); if (originalName.Length > 200) originalName = originalName[^200..];
+    var asset = new PatternSourceAsset { OriginalFileName = originalName, ByteSize = bytes.Length, Sha256 = StorageKeys.Hash(bytes) };
+    var path = Path.Combine(Path.GetTempPath(), "stitch-import-" + Guid.NewGuid().ToString("N") + ".pdf");
+    try
+    {
+        await File.WriteAllBytesAsync(path, bytes, ct); PatternData data;
         try { data = importer.Parse(path, repo.Catalog()); }
         catch (Exception ex)
         {
-            app.Logger.LogWarning(ex, "PDF import failed for {SourceId}", id);
-            data = new() { Warnings = [new(ex is UserError ? ex.Message : "This PDF could not be read. It may be encrypted, damaged, or use an unsupported format. The original is retained.")] };
-            File.WriteAllText(Path.Combine(repo.Root, "sources", id + ".diagnostic.txt"), ex.ToString());
+            app.Logger.LogWarning("PDF import {AssetId} failed with {FailureType}", asset.Id, ex.GetType().Name);
+            data = new() { Warnings = [new(ex is UserError ? ex.Message : "This PDF could not be read. It may be encrypted, damaged, or unsupported. The original is retained.")] };
         }
-        return View(repo.Create(new(id, Path.GetFileNameWithoutExtension(file.FileName)[..Math.Min(160, Path.GetFileNameWithoutExtension(file.FileName).Length)], name, data)));
+        memory.Position = 0; await store.Put(asset.StorageKey, memory, asset.MediaType, ct);
+        try
+        {
+            var name = Path.GetFileNameWithoutExtension(originalName); name = name[..Math.Min(160, name.Length)];
+            return View(repo.Create(new(Guid.NewGuid().ToString("N"), name, null, data), asset: asset, imported: true), repo);
+        }
+        catch { await store.Delete(asset.StorageKey, CancellationToken.None); throw; }
     }
-}).DisableAntiforgery();
-app.MapGet("/api/catalog", (IRepository repo) => repo.Catalog().Values);
-app.MapPost("/api/catalog", (ThreadEntry entry, IRepository repo) => { repo.AddThread(entry); return Results.Ok(entry); });
-app.MapGet("/api/inventory", (IRepository repo) => repo.Inventory());
-app.MapPut("/api/inventory/{code}", (string code, InventoryEntry entry, IRepository repo) => { if (code != entry.Code) throw new UserError("Thread codes do not match."); repo.SaveInventory(entry); return Results.Ok(entry); });
-app.MapGet("/api/backups", (BackupService backup) => backup.List());
-app.MapPost("/api/backups", (BackupService backup) => new { name = backup.Create() });
-app.MapGet("/api/backups/{name}", (string name, IRepository repo) =>
-{
-    if (Path.GetFileName(name) != name || !name.EndsWith(".zip")) throw new UserError("Invalid backup name.");
-    var path = Path.Combine(repo.Root, "backups", name);
-    return File.Exists(path) ? Results.File(path, "application/zip", name) : Results.NotFound();
+    finally { if (File.Exists(path)) File.Delete(path); }
 });
+api.MapGet("/catalog", (IRepository repo) => repo.Catalog().Values);
+api.MapGet("/inventory", (IRepository repo) => repo.Inventory());
+api.MapPut("/inventory/{code}", (string code, InventoryEntry entry, IRepository repo) => { if (code != entry.Code) throw new UserError("Thread codes do not match."); return repo.SaveInventory(entry); });
+api.MapGet("/preferences", (StitchDbContext db, ICurrentUserContext user) => { var p = db.Preferences.AsNoTracking().SingleOrDefault(x => x.UserId == user.UserId); return new { revision = p?.Revision ?? 0, values = Json.Read<System.Text.Json.JsonElement>(p?.Json ?? "{}") }; });
+api.MapPut("/preferences", (PreferenceRequest request, StitchDbContext db, ICurrentUserContext user) =>
+{
+    if (request.Values.ValueKind != System.Text.Json.JsonValueKind.Object || request.Values.GetRawText().Length > 16000) throw new UserError("Preferences must be an object under 16 KB.");
+    using var tx = db.Database.BeginTransaction();
+    db.Database.ExecuteSqlInterpolated($"SELECT pg_advisory_xact_lock(hashtextextended({user.UserId + ":preferences"}, 0))");
+    var p = db.Preferences.SingleOrDefault(x => x.UserId == user.UserId);
+    if ((p?.Revision ?? 0) != request.Revision) throw Repository.Conflict();
+    if (p is null) { p = new() { UserId = user.UserId }; db.Preferences.Add(p); }
+    p.Json = request.Values.GetRawText(); p.Revision++; db.SaveChanges(); tx.Commit();
+    return new { p.Revision, request.Values };
+});
+api.MapGet("/backups", (BackupService backups, ICurrentUserContext user) => backups.List(user.UserId).Select(b => new { b.Id, b.Kind, b.CreatedAt, bytes = b.ByteSize }));
+api.MapGet("/backups/{id}/download", async (string id, BackupService backups, ICurrentUserContext user, CancellationToken ct) => new PrivateDownload(await backups.Download(user.UserId, id, ct), $"stitch-helper-backup-{id}.zip"));
+api.MapPost("/exports/current", async (BackupService backups, ICurrentUserContext user, CancellationToken ct) => new PrivateDownload(await backups.Export(user.UserId, ct: ct), $"stitch-helper-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip"));
+api.MapFallback("/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 app.Run();
+public record PreferenceRequest(long Revision, System.Text.Json.JsonElement Values);
 public partial class Program { }

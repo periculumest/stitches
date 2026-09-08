@@ -9,3 +9,9 @@ playwright-report/
 test-results/
 server/wwwroot/
 *.tsbuildinfo
+.env
+*.pfx
+*.pem
+*.key
+server/appsettings.*.local.json
+.nuget/

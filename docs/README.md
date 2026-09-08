@@ -1,8 +1,12 @@
 # Stitch Helper — Specification Pack
 
-This folder contains the current product and implementation handoff for Stitch Helper.
+This folder contains the product and implementation handoff for Stitch Helper. The current release is described in [phase 2 implementation decisions](<phase 2/IMPLEMENTATION-DECISIONS.md>), [preproduction setup](<phase 2/PREPROD-READINESS.md>), and [phase 2 validation](<phase 2/VALIDATION.md>).
 
-The runnable MVP is documented in the repository [README](../README.md). See [implementation decisions](IMPLEMENTATION-DECISIONS.md) for departures and limitations, [validation](VALIDATION.md) for delivered coverage, and [recovery](RECOVERY.md) for restoring a backup.
+The application is documented in the repository [README](../README.md). The top-level implementation decisions, validation, and recovery files describe the historical phase 1 SQLite MVP; its restore commands do not apply to the phase 2 PostgreSQL release.
+
+Import findings and proposed follow-up work are recorded in [import reliability](<phase 2/IMPORT-RELIABILITY.md>).
+
+For correcting an imported page layout, see the [visual page builder guide](<phase 2/PAGE-BUILDER.md>).
 
 ## Recommended reading order
 

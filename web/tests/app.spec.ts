@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -48,9 +48,9 @@ test('stitching, undo, substitutions, inventory, and persisted reload', async ({
   const saved = await (await request.get(`/api/projects/${id}`)).json();
   expect(saved.completed.length).toBeGreaterThan(0); expect(saved.completed.length).toBeLessThan(saved.data.stitches.length);
   await page.getByRole('button', { name: 'Threads', exact: true }).click();
-  await page.getByLabel('Replacement for DMC 500', { exact: true }).selectOption('310');
+  await page.getByLabel(/Replacement for symbol .* component 500/).first().selectOption('310');
   await expect(page.locator('.save-status')).toContainText('Saved');
-  expect((await (await request.get(`/api/projects/${id}`)).json()).substitutions['500']).toBe('310');
+  expect((await (await request.get(`/api/projects/${id}`)).json()).substitutions[saved.data.definitions.find((d: { threadCode: string }) => d.threadCode === '500').components[0].id]).toBe('310');
   await page.getByRole('button', { name: 'Thread collection', exact: true }).click();
   await page.getByRole('textbox', { name: 'Search thread catalog' }).fill('310');
   await page.getByRole('button', { name: 'Add to collection', exact: true }).click();
@@ -118,18 +118,20 @@ test('working area, painting, erasing, edit undo, and save failure', async ({ pa
   await page.getByRole('button', { name: 'Remove stitch', exact: true }).click(); await expect(page.locator('.save-status')).toContainText('Saved');
   saved = await (await request.get(`/api/projects/${p.id}`)).json(); expect(saved.data.stitches.some((s: { id: string }) => s.id === stitch.id)).toBe(false);
   await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(page.locator('.save-status')).toContainText('Saved');
-  await page.route('**/api/projects/*/commands', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Server unavailable.' }) }));
+  await page.route('**/api/projects/*/progress', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Server unavailable.' }) }));
   await page.getByRole('button', { name: 'Mark matching complete', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('last confirmed save');
-  await expect(page.locator('.workspace-progress')).toContainText('0.0');
+  await expect(page.getByRole('alert')).toContainText('not yet confirmed');
+  expect((await (await request.get(`/api/projects/${p.id}`)).json()).completed).toHaveLength(0);
+  await page.unroute('**/api/projects/*/progress');
+  await page.getByRole('button', { name: 'Retry saving' }).click();
+  await expect(page.locator('.save-status')).toContainText('Saved');
 });
 
 test('backup download and large-pattern viewport stays bounded', async ({ page, request }) => {
-  await page.goto('/'); await page.getByRole('button', { name: 'Backups & care', exact: true }).click();
-  await page.getByRole('button', { name: 'Back up now', exact: true }).click();
-  await expect(page.locator('.backup-row').first()).toBeVisible();
-  const href = await page.getByRole('link', { name: 'Download' }).first().getAttribute('href');
-  expect((await request.get(href!)).status()).toBe(200);
+  await page.goto('/'); await page.getByRole('button', { name: 'Backups & Export', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download current data', exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/stitch-helper-backup.*zip/);
   const begin = Date.now(); const p = await (await request.post('/api/projects/sample?size=1000')).json();
   await request.post(`/api/projects/${p.id}/commands`, { data: { revision: 0, kind: 'rename', name: 'Large benchmark' } });
   await page.goto('/'); await page.getByRole('button', { name: 'Open Large benchmark', exact: true }).click();
@@ -183,6 +185,16 @@ test('supplied symbol-font PDF imports with verified counts and real symbol shap
   const bounds = await page.locator('.key-choice .source-symbol path').evaluateAll(paths => paths.map(p => { const b = (p as SVGGraphicsElement).getBBox(); return { width: b.width, height: b.height }; }));
   expect(bounds.every(b => b.width > 0 && b.height > 0)).toBe(true);
   await page.screenshot({ path: '../artifacts/supplied-pdf-audit.png', fullPage: true });
+  await page.getByRole('button', { name: 'Arrange pages', exact: true }).click();
+  await expect(page.locator('.builder-checks')).toContainText('No conflicting stitches');
+  await page.getByRole('combobox', { name: 'Selected page', exact: true }).selectOption({ index: 1 });
+  await page.getByLabel('Column offset').fill('0');
+  await page.getByLabel('Row offset').fill('0');
+  await expect(page.locator('.builder-checks')).toContainText('conflicting stitch pairs');
+  await expect(page.getByRole('button', { name: 'Save arrangement', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Reset layout', exact: true }).click();
+  await expect(page.locator('.builder-checks')).toContainText('No conflicting stitches');
+  await page.getByRole('button', { name: 'Close page builder', exact: true }).click();
   await page.getByRole('button', { name: 'Looks good, start stitching' }).click();
   await expect(page.getByText('Does this look like your pattern?')).not.toBeVisible();
   await page.getByLabel('Apply completion to').selectOption('pattern');

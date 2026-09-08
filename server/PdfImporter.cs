@@ -13,10 +13,12 @@ public class PdfImporter : IPatternImporter
     private record Grid(Page Page, double[] X, double[] Y);
     public PatternData Parse(string path, IReadOnlyDictionary<string, ThreadEntry> catalog)
     {
-        var result = new PatternData();
+        var result = new PatternData { PageSourcesComplete = true };
         using var document = PdfDocument.Open(path);
         if (document.NumberOfPages > 150) throw new UserError("Please split PDFs longer than 150 pages before importing.");
         var pages = document.GetPages().ToList();
+        var professional = CrossStitchProfessionalImporter.TryParse(pages, catalog);
+        if (professional is not null) return professional;
         var chartTable = ChartTableImporter.TryParse(pages, catalog);
         if (chartTable is not null) return chartTable;
         var grids = new List<Grid>();
@@ -45,7 +47,7 @@ public class PdfImporter : IPatternImporter
                 // Reconstruct spaces from geometry so a symbol cannot swallow the thread code.
                 var text = ""; double right = -100;
                 foreach (var l in ordered) { if (l.StartBaseLine.X - right > Math.Max(1.5, l.FontSize * .25)) text += " "; text += l.Value; right = l.EndBaseLine.X; }
-                var match = Regex.Match(text, @"^\s*(\S{1,2})\s+(?:DMC\s+)?(B5200|White|Blanc|Ecru|\d{1,4})\b", RegexOptions.IgnoreCase);
+                var match = Regex.Match(text, @"^\s*(\S{1,2})\s+((?:DMC\s+)?(?:B5200|White|Blanc|Ecru|\d{1,4})(?:\s*\(\d+\))?(?:\s*\+\s*(?:DMC\s+)?(?:B5200|White|Blanc|Ecru|\d{1,4})(?:\s*\(\d+\))?)*)", RegexOptions.IgnoreCase);
                 if (!match.Success) continue;
                 var symbol = match.Groups[1].Value;
                 var raw = ThreadCatalog.CanonicalCode(match.Groups[2].Value);
@@ -71,9 +73,11 @@ public class PdfImporter : IPatternImporter
                 var definition = result.Definitions.FirstOrDefault(d => d.Symbol == symbol);
                 if (definition is null)
                 {
-                    definition = new($"d{result.Definitions.Count}", symbol, mappings.GetValueOrDefault(symbol, "UNKNOWN"));
+                    var definitionId = $"d{result.Definitions.Count}";
+                    var composition = mappings.TryGetValue(symbol, out var expression) ? ThreadUsageParser.Parse(expression, definitionId, catalog) : [new ThreadUsageComponent(definitionId + "-c0", "UNKNOWN")];
+                    definition = new(definitionId, symbol, composition[0].ThreadCode, Components: composition);
                     result.Definitions.Add(definition);
-                    if (!catalog.ContainsKey(definition.ThreadCode)) result.Warnings.Add(new($"Assign a DMC thread to symbol {symbol} (detected: {definition.ThreadCode}).", grid.Page.Number, x, y + offsetY));
+                    if (composition.Any(c => !catalog.ContainsKey(c.ThreadCode))) result.Warnings.Add(new($"Assign catalog threads to every component of symbol {symbol}.", grid.Page.Number, x, y + offsetY));
                 }
                 result.Stitches.Add(new($"p{grid.Page.Number}-{x}-{y}", x, y + offsetY, definition.Id));
             }
@@ -99,7 +103,7 @@ public class PdfImporter : IPatternImporter
     {
         var index = Array.BinarySearch(axis, coordinate); return index >= 0 ? Math.Min(index, axis.Length - 2) : ~index - 1;
     }
-    private static double[] RegularAxis(IEnumerable<double> coordinates)
+    internal static double[] RegularAxis(IEnumerable<double> coordinates)
     {
         var values = coordinates.Select(v => Math.Round(v, 1)).Distinct().Order().ToArray();
         if (values.Length < 6) return [];

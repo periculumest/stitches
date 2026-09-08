@@ -8,11 +8,11 @@ namespace StitchHelper;
 /// <summary>Charts with Symbol/Strands/Type/Number/Color legends, symbol fonts, and printed global coordinates.</summary>
 public static class ChartTableImporter
 {
-    private record Legend(Letter Letter, string Code);
+    private record Legend(Letter Letter, string Code, string Strands);
     private record Tile(Page Page, List<Letter> Letters, double[] X, double[] Y, int OffsetX, int OffsetY);
     private record Header(List<Letter> Row, Dictionary<string, double> Boundaries);
-    private static string FontKey(Letter l) => Regex.Replace(l.FontName ?? "", @"^[A-Z]{6}\+", "");
-    private static string SymbolKey(Letter l) => FontKey(l) + "\0" + l.Value;
+    internal static string FontKey(Letter l) => Regex.Replace(l.FontName ?? "", @"^[A-Z]{6}\+", "");
+    internal static string SymbolKey(Letter l) => FontKey(l) + "\0" + l.Value;
 
     public static PatternData? TryParse(IReadOnlyList<Page> pages, IReadOnlyDictionary<string, ThreadEntry> catalog)
     {
@@ -37,7 +37,7 @@ public static class ChartTableImporter
                     var key = SymbolKey(symbols[0]);
                     if (legend.TryGetValue(key, out var previous) && previous.Code != code)
                         throw new UserError("This chart assigns multiple threads to the same font symbol. Automatic import cannot safely distinguish them yet.");
-                    legend[key] = new(symbols[0], code);
+                    legend[key] = new(symbols[0], code, Column(row, header, "Strands"));
                 }
             }
             var usage = FindHeader(rows, ["Type", "Number", "Full", "Half"]);
@@ -68,15 +68,17 @@ public static class ChartTableImporter
             tiles.Add(new(page, symbols, xs, ys, offsetX.Value, offsetY.Value));
         }
         if (tiles.Count == 0) return null;
-        var result = new PatternData { Warnings = notes };
+        var result = new PatternData { Warnings = notes, PageSourcesComplete = true };
         var definitions = new Dictionary<string, StitchDefinition>();
         foreach (var (key, entry) in legend)
         {
             var glyph = ExtractGlyph(entry.Letter);
-            var definition = new StitchDefinition($"d{definitions.Count}", entry.Letter.Value, entry.Code, "FullCross", glyph);
+            var definitionId = $"d{definitions.Count}";
+            var composition = ThreadUsageParser.Parse(entry.Code, definitionId, catalog, entry.Strands);
+            var definition = new StitchDefinition(definitionId, entry.Letter.Value, composition[0].ThreadCode, "FullCross", glyph, composition);
             definitions[key] = definition;
             if (glyph is null) notes.Add(new($"The source shape for DMC {entry.Code} could not be preserved. A text symbol is shown; check it against the key."));
-            if (!catalog.ContainsKey(entry.Code)) notes.Add(new($"DMC {entry.Code} is not in the thread catalog. Assign a thread before starting."));
+            if (composition.Any(c => !catalog.ContainsKey(c.ThreadCode))) notes.Add(new($"DMC {entry.Code} is not in the thread catalog. Assign a thread before starting."));
         }
         var occupied = new Dictionary<(int, int), Stitch>();
         var overlapCount = 0;
@@ -98,6 +100,7 @@ public static class ChartTableImporter
                 if (occupied.TryGetValue((x, y), out var previous))
                 {
                     if (previous.DefinitionId != definition.Id) throw new UserError($"Repeated stitches disagree at column {x + 1}, row {y + 1} on PDF page {tile.Page.Number}. The page placement needs review.");
+                    result.PageOverlapStitches.Add(new($"p{tile.Page.Number}-{x - tile.OffsetX}-{y - tile.OffsetY}", x, y, definition.Id));
                     overlapCount++; continue;
                 }
                 occupied[(x, y)] = new($"p{tile.Page.Number}-{x - tile.OffsetX}-{y - tile.OffsetY}", x, y, definition.Id);
@@ -118,8 +121,8 @@ public static class ChartTableImporter
         var dimensions = pages.Select(p => Regex.Match(p.Text, @"\b(\d+)\s*w\s*[xX×]\s*(\d+)\s*h\s*Stitches", RegexOptions.IgnoreCase)).FirstOrDefault(m => m.Success);
         if (dimensions is not null && (int.Parse(dimensions.Groups[1].Value) != result.Width || int.Parse(dimensions.Groups[2].Value) != result.Height))
             throw new UserError($"Assembled chart dimensions {result.Width} × {result.Height} disagree with the design size printed in the PDF. Import stopped for review.");
-        var codesByDefinition = definitions.Values.ToDictionary(d => d.Id, d => d.ThreadCode);
-        var counts = result.Stitches.GroupBy(s => codesByDefinition[s.DefinitionId]).ToDictionary(g => g.Key, g => g.Count());
+        var codesByDefinition = definitions.Values.ToDictionary(d => d.Id, d => d.GetComponents().Select(c => c.ThreadCode).ToArray());
+        var counts = result.Stitches.SelectMany(s => codesByDefinition[s.DefinitionId]).GroupBy(code => code).ToDictionary(g => g.Key, g => g.Count());
         foreach (var (code, count) in expected)
             if (counts.GetValueOrDefault(code) != count) throw new UserError($"DMC {code}: extracted {counts.GetValueOrDefault(code)} stitches, but the PDF usage summary lists {count}. Import stopped to avoid an incomplete chart.");
         notes.Add(new($"Assembled {tiles.Count} chart pages using printed grid coordinates; removed {overlapCount:N0} matching stitches repeated in overlap strips."));
@@ -128,7 +131,7 @@ public static class ChartTableImporter
         return result;
     }
 
-    private static List<List<Letter>> Rows(IEnumerable<Letter> letters)
+    internal static List<List<Letter>> Rows(IEnumerable<Letter> letters)
     {
         List<List<Letter>> rows = [];
         foreach (var l in letters.OrderByDescending(l => l.StartBaseLine.Y))
@@ -195,7 +198,7 @@ public static class ChartTableImporter
         var votes = labels.Select(l => l.Number - (int)Math.Round((vertical ? origin - l.Position : l.Position - origin) / step)).GroupBy(v => v).OrderByDescending(g => g.Count()).ToList();
         return votes.Count > 0 && votes[0].Count() >= 2 && votes[0].Count() >= labels.Count * .6 ? votes[0].Key : null;
     }
-    private static SymbolGlyph? ExtractGlyph(Letter letter)
+    internal static SymbolGlyph? ExtractGlyph(Letter letter)
     {
         var font = letter.GetFont(); if (font is null) return null;
         for (var code = 0; code < 256; code++)

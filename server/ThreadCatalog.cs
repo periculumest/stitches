@@ -34,7 +34,11 @@ public static class ThreadCatalog
         data.Definitions = data.Definitions.Select(Normalize).ToList();
         return data;
     }
-    private static StitchDefinition Normalize(StitchDefinition d) => d with { ThreadCode = CanonicalCode(d.ThreadCode) };
+    private static StitchDefinition Normalize(StitchDefinition d)
+    {
+        var components = d.GetComponents().Select(c => c with { ThreadCode = CanonicalCode(c.ThreadCode) }).ToList();
+        return d with { ThreadCode = components.FirstOrDefault()?.ThreadCode ?? CanonicalCode(d.ThreadCode), Components = components };
+    }
 
     public static Project Normalize(Project project)
     {

@@ -1,12 +1,8 @@
-param(
-    [switch]$SkipBuild,
-    [string]$DataDirectory = (Join-Path $PSScriptRoot '.data'),
-    [int]$Port = 5057
-)
+param([switch]$SkipBuild, [switch]$Migrate, [int]$Port = 5057)
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
-    $env:STITCH_DATA_DIR = [System.IO.Path]::GetFullPath($DataDirectory)
+    $env:ASPNETCORE_ENVIRONMENT = 'Development'
     if (-not $SkipBuild) {
         & npm ci --prefix web
         if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
@@ -15,9 +11,12 @@ try {
         & dotnet build server -c Release
         if ($LASTEXITCODE -ne 0) { throw 'Server build failed.' }
     }
-    Write-Host "Open http://127.0.0.1:$Port in your browser. Press Ctrl+C here to stop."
-    Write-Host "Your data: $env:STITCH_DATA_DIR"
+    if ($Migrate) {
+        & dotnet run --project server -c Release --no-build -- --migrate
+        if ($LASTEXITCODE -ne 0) { throw 'Migration failed. Start PostgreSQL and check the connection configuration.' }
+    }
+    Write-Host "Open http://127.0.0.1:$Port. PostgreSQL and Google OAuth must be configured; see docs/phase 2/PREPROD-READINESS.md."
     & dotnet run --project server -c Release --no-build -- --urls "http://127.0.0.1:$Port"
-    if ($LASTEXITCODE -ne 0) { throw 'Stitch Helper could not start. Check the message above (the port may already be in use).' }
+    if ($LASTEXITCODE -ne 0) { throw 'Stitch Helper could not start. Check the configuration and port.' }
 }
 finally { Pop-Location }

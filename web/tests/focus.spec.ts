@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('focus keeps the current place, filters, marking, and save errors accessible', async ({ page, request }) => {
   const project = await (await request.post('/api/projects/sample')).json();
@@ -59,10 +59,10 @@ test('focus keeps the current place, filters, marking, and save errors accessibl
   await expect(page.locator('.save-status')).toContainText('Saved');
   await page.screenshot({ path: '../artifacts/focused-pattern.png', fullPage: true });
 
-  await page.route('**/api/projects/*/commands', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Server unavailable.' }) }));
+  await page.route('**/api/projects/*/progress', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Server unavailable.' }) }));
   await page.mouse.click(x, y);
-  await expect(page.getByRole('alert')).toContainText('last confirmed save');
-  await expect(page.getByRole('button', { name: 'Reload saved project' })).toBeInViewport();
+  await expect(page.getByRole('alert')).toContainText('not yet confirmed');
+  await expect(page.getByRole('button', { name: 'Retry saving' })).toBeInViewport();
   await expect(page.getByRole('button', { name: 'Exit focus', exact: true })).toBeInViewport();
   await page.getByRole('button', { name: 'Exit focus', exact: true }).click();
   await expect(page.locator('.sidebar')).toBeVisible();
@@ -87,7 +87,7 @@ test('focused pattern fits a narrow window and exits during a pending save', asy
   // Hold a real save response so Escape must remain available while busy.
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
-  await page.route('**/api/projects/*/commands', async route => { await gate; await route.continue(); });
+  await page.route('**/api/projects/*/progress', async route => { await gate; await route.continue(); });
   await page.getByLabel('Apply completion to').selectOption('pattern');
   await page.getByRole('button', { name: 'Mark matching complete', exact: true }).click();
   await page.getByRole('button', { name: 'Focus pattern', exact: true }).click();

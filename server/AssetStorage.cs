@@ -35,7 +35,16 @@ public class LocalObjectStore(string directory) : IPrivateObjectStore
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public Task<Stream> Read(string key, CancellationToken cancellation = default) => Task.FromResult<Stream>(File.OpenRead(PathFor(key)));
-    public Task Delete(string key, CancellationToken cancellation = default) { File.Delete(PathFor(key)); return Task.CompletedTask; }
+    public Task Delete(string key, CancellationToken cancellation = default)
+    {
+        var path = PathFor(key);
+        File.Delete(path);
+        var folder = Path.GetDirectoryName(path)!;
+        if (Directory.Exists(folder))
+            foreach (var partial in Directory.EnumerateFiles(folder, key + ".partial-*"))
+                if (Regex.IsMatch(Path.GetFileName(partial), "^[a-f0-9]{32}\\.partial-[a-f0-9]{32}$")) File.Delete(partial);
+        return Task.CompletedTask;
+    }
 }
 public sealed class LocalPatternAssetStore(string root) : LocalObjectStore(Path.Combine(root, "sources")), IPatternAssetStore { }
 public sealed class LocalBackupArtifactStore(string root) : LocalObjectStore(Path.Combine(root, "backups")), IBackupArtifactStore { }
@@ -48,7 +57,7 @@ public class GoogleObjectStore(StorageClient client, string bucket) : IPrivateOb
     public async Task<Stream> Read(string key, CancellationToken cancellation = default)
     {
         // Temporary download staging is disposable and bounded by the source/export limits.
-        var stream = new FileStream(Path.Combine(Path.GetTempPath(), "stitch-read-" + Guid.NewGuid().ToString("N")), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+        var stream = new FileStream(TemporaryFiles.CreatePath("read"), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
         try { await client.DownloadObjectAsync(bucket, StorageKeys.Validate(key), stream, cancellationToken: cancellation); stream.Position = 0; return stream; }
         catch { await stream.DisposeAsync(); throw; }
     }

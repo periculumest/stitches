@@ -4,7 +4,17 @@ namespace StitchHelper;
 
 public static class ThreadCatalog
 {
-    public static string CanonicalCode(string code) => code.Equals("Blanc", StringComparison.OrdinalIgnoreCase) ? "White" : code;
+    public static string CanonicalCode(string code)
+    {
+        code = code.Trim();
+        if (code.Equals("Blanc", StringComparison.OrdinalIgnoreCase)) return "White";
+        if (code.Length > 0 && code.All(char.IsAsciiDigit))
+        {
+            var unpadded = code.TrimStart('0');
+            return unpadded.Length == 0 ? "0" : unpadded;
+        }
+        return code;
+    }
 
     public static List<ThreadEntry> Load(string path)
     {
@@ -13,7 +23,7 @@ public static class ThreadCatalog
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in document.RootElement.EnumerateArray())
         {
-            var code = row.GetProperty("floss").GetString() ?? throw new InvalidDataException("A catalog row has no floss code.");
+            var code = CanonicalCode(row.GetProperty("floss").GetString() ?? throw new InvalidDataException("A catalog row has no floss code."));
             var name = row.GetProperty("description").GetString() ?? throw new InvalidDataException($"DMC {code} has no description.");
             var r = row.GetProperty("r").GetInt32();
             var g = row.GetProperty("g").GetInt32();
@@ -44,13 +54,12 @@ public static class ThreadCatalog
     {
         Normalize(project.Data);
         var substitutions = new Dictionary<string, string>();
-        // An explicit canonical White mapping wins if an older snapshot contains both spellings.
-        foreach (var (code, replacement) in project.Substitutions.OrderBy(pair => pair.Key == "White" ? 1 : 0))
-            substitutions[CanonicalCode(code)] = CanonicalCode(replacement);
+        // Keys identify thread components; only replacement values are DMC codes.
+        foreach (var (componentId, replacement) in project.Substitutions)
+            substitutions[componentId] = CanonicalCode(replacement);
         project.Substitutions = substitutions;
         foreach (var change in project.Undo.Concat(project.Redo))
         {
-            if (change.Code is not null) change.Code = CanonicalCode(change.Code);
             if (change.Replacement is not null) change.Replacement = CanonicalCode(change.Replacement);
             if (change.Definition is not null) change.Definition = Normalize(change.Definition);
             if (change.Data is not null) Normalize(change.Data);

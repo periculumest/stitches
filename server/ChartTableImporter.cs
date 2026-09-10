@@ -77,7 +77,6 @@ public static class ChartTableImporter
             var composition = ThreadUsageParser.Parse(entry.Code, definitionId, catalog, entry.Strands);
             var definition = new StitchDefinition(definitionId, entry.Letter.Value, composition[0].ThreadCode, "FullCross", glyph, composition);
             definitions[key] = definition;
-            if (glyph is null) notes.Add(new($"The source shape for DMC {entry.Code} could not be preserved. A text symbol is shown; check it against the key."));
             if (composition.Any(c => !catalog.ContainsKey(c.ThreadCode))) notes.Add(new($"DMC {entry.Code} is not in the thread catalog. Assign a thread before starting."));
         }
         var occupied = new Dictionary<(int, int), Stitch>();
@@ -127,7 +126,8 @@ public static class ChartTableImporter
             if (counts.GetValueOrDefault(code) != count) throw new UserError($"DMC {code}: extracted {counts.GetValueOrDefault(code)} stitches, but the PDF usage summary lists {count}. Import stopped to avoid an incomplete chart.");
         notes.Add(new($"Assembled {tiles.Count} chart pages using printed grid coordinates; removed {overlapCount:N0} matching stitches repeated in overlap strips."));
         if (expected.Count > 0) notes.Add(new($"Verified full-stitch counts against the PDF usage summary for {expected.Count} threads."));
-        notes.Add(new("Source symbol shapes are preserved. Review the assembled chart and key before starting; this adapter imports full crosses."));
+        ImportSymbols.AssignMissing(result, requireSourceGlyph: true);
+        notes.Add(new("Source symbol shapes are preserved where available. Review the assembled chart and key before starting; this adapter imports full crosses."));
         return result;
     }
 
@@ -206,6 +206,7 @@ public static class ChartTableImporter
             if (!font.TryGetUnicode(code, out var value) || value != letter.Value || !font.TryGetNormalisedPath(code, out var paths) || paths.Count == 0) continue;
             var bounds = PdfSubpath.GetBoundingRectangle(paths);
             if (bounds is null || bounds.Value.Width <= 0 || bounds.Value.Height <= 0) continue;
+            if (paths.SelectMany(p => p.Commands).Any(c => c is not (PdfSubpath.Move or PdfSubpath.Line or PdfSubpath.QuadraticBezierCurve or PdfSubpath.CubicBezierCurve or PdfSubpath.Close))) continue;
             var svg = new StringBuilder();
             static string Point(PdfPoint p) => FormattableString.Invariant($"{p.X:0.######} {-p.Y:0.######}");
             foreach (var command in paths.SelectMany(p => p.Commands))

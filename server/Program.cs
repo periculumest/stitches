@@ -38,6 +38,8 @@ builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
 builder.Services.AddScoped<IRepository, Repository>();
 builder.Services.AddSingleton<IPatternImporter, PdfImporter>();
 builder.Services.AddScoped<BackupService>();
+builder.Services.AddScoped<RetentionService>();
+builder.Services.AddHostedService<RetentionWorker>();
 builder.Services.AddScoped<GoogleIdentityResolver>();
 builder.Services.AddIdentity<ApplicationUser, IdentityRole<Guid>>(o => { o.User.RequireUniqueEmail = false; })
     .AddEntityFrameworkStores<StitchDbContext>().AddDefaultTokenProviders();
@@ -102,6 +104,8 @@ if (storage == "GoogleCloudStorage")
         var bucket = await client.GetBucketAsync(bucketName);
         if (bucket.IamConfiguration?.PublicAccessPrevention != "enforced" || bucket.IamConfiguration?.UniformBucketLevelAccess?.Enabled != true)
             throw new InvalidOperationException("Private storage requires enforced public access prevention and uniform bucket-level access on both configured buckets.");
+        if (bucket.Versioning?.Enabled == true || bucket.DefaultEventBasedHold == true || bucket.RetentionPolicy?.RetentionPeriod > 0 || bucket.SoftDeletePolicy?.RetentionDurationSeconds > 604800)
+            throw new InvalidOperationException("Deletion policy requires bucket versioning and default holds disabled, no bucket retention lock, and soft-delete recovery of at most 7 days. Review existing object holds separately.");
     }
 }
 if (args.Contains("--backup"))
@@ -118,6 +122,16 @@ if (args.Contains("--backup"))
         catch (Exception ex) { failed = true; app.Logger.LogError(ex, "Backup {Kind} failed for user {UserId}", kind, owner); }
     }
     Environment.ExitCode = failed ? 1 : 0; return;
+}
+if (args.Contains("--cleanup") || args.Contains("--retention-status"))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<StitchDbContext>();
+    Console.WriteLine($"Retention status: {await db.Projects.CountAsync()} projects, {await db.Patterns.CountAsync(p => !db.Projects.Any(j => j.PatternId == p.Id))} unreferenced patterns, {await db.Assets.CountAsync(a => !db.Patterns.Any(p => p.AssetId == a.Id))} unreferenced source records, {await db.PendingObjectDeletions.CountAsync()} pending object deletions.");
+    if (args.Contains("--cleanup")) await scope.ServiceProvider.GetRequiredService<RetentionService>().Maintain(CancellationToken.None);
+    var overdue = await db.PendingObjectDeletions.CountAsync(d => d.QueuedAt < DateTimeOffset.UtcNow.AddHours(-24) && d.Attempts > 0);
+    Console.WriteLine($"Pending object deletions: {await db.PendingObjectDeletions.CountAsync()}; overdue attempted deletions: {overdue}.");
+    Environment.ExitCode = overdue > 0 ? 1 : 0; return;
 }
 // One canonical public origin makes redirects safe behind any HTTPS ingress, without trusting forwarded headers.
 app.Use(async (context, next) =>
@@ -141,6 +155,16 @@ app.UseDefaultFiles(); app.UseStaticFiles();
 app.UseAuthentication(); app.UseAuthorization();
 app.Use(async (context, next) =>
 {
+    if (context.User.Identity?.IsAuthenticated == true && (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")))
+    {
+        var current = context.RequestServices.GetRequiredService<ICurrentUserContext>();
+        var db = context.RequestServices.GetRequiredService<StitchDbContext>();
+        if (!await db.Users.AnyAsync(u => u.Id == current.UserId, context.RequestAborted))
+        {
+            await context.SignOutAsync(IdentityConstants.ApplicationScheme);
+            context.Response.StatusCode = 401; return;
+        }
+    }
     if (context.Request.Method is not ("GET" or "HEAD" or "OPTIONS") &&
         (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")))
     {
@@ -164,17 +188,29 @@ api.MapGet("/projects", (IRepository repo) => repo.List().Select(p => new { p.Id
 api.MapGet("/projects/{id}", (string id, IRepository repo) => View(repo.Get(id), repo));
 api.MapGet("/projects/{id}/state", (string id, long? revision, IRepository repo) => { var p = repo.GetState(id, revision); return p is null ? Results.NoContent() : Results.Ok(State(p)); });
 api.MapGet("/patterns/{id}", (string id, IRepository repo) => repo.GetPattern(id));
-api.MapPost("/patterns/{id}/projects", (string id, IRepository repo) => View(repo.Create(repo.GetPattern(id)), repo));
+api.MapPost("/patterns/{id}/projects", (string id, IRepository repo) => View(repo.Create(repo.GetPattern(id), requireExisting: true), repo));
 api.MapPost("/projects/sample", (IRepository repo, int? size) => View(repo.Create(SamplePattern.Create(Math.Clamp(size ?? 100, 20, 1000)), status: "active"), repo));
-api.MapPost("/projects/{id}/duplicate", (string id, IRepository repo) => { var original = repo.Get(id); return View(repo.Create(repo.GetPattern(original.PatternId), original.Name + " · new start", "audit"), repo); });
+api.MapPost("/projects/{id}/duplicate", (string id, IRepository repo) => { var original = repo.Get(id); return View(repo.Create(repo.GetPattern(original.PatternId), original.Name + " · new start", "audit", requireExisting: true), repo); });
 api.MapPost("/projects/{id}/commands", (string id, Command command, IRepository repo) => View(repo.Execute(id, command), repo));
 api.MapPost("/projects/{id}/progress", (string id, ProgressBatch batch, IRepository repo) => State(repo.Progress(id, batch)));
-api.MapDelete("/projects/{id}", (string id, IRepository repo) => { repo.Delete(id); return Results.NoContent(); });
+api.MapDelete("/projects/{id}", async (string id, IRepository repo, RetentionService retention, CancellationToken ct) =>
+{
+    repo.Delete(id);
+    // The committed queue survives cancellation or storage failure; the worker completes cleanup.
+    await retention.TryCleanupAfterDeletion(ct); return Results.NoContent();
+});
+api.MapDelete("/account", async ([Microsoft.AspNetCore.Mvc.FromBody] AccountDeletion request, ICurrentUserContext current, RetentionService retention, SignInManager<ApplicationUser> signIn, CancellationToken ct) =>
+{
+    if (request.Confirmation != "DELETE") throw new UserError("Type DELETE to confirm permanent account deletion.");
+    retention.DeleteAccount(current.UserId);
+    await signIn.SignOutAsync();
+    await retention.TryCleanupAfterDeletion(ct); return Results.NoContent();
+});
 api.MapGet("/projects/{id}/source", async (string id, IRepository repo, IPatternAssetStore store, CancellationToken ct) =>
 {
     var source = repo.GetSource(id); return Results.File(await store.Read(source.StorageKey, ct), source.MediaType, enableRangeProcessing: true);
 });
-api.MapPost("/imports", async (HttpRequest request, IRepository repo, IPatternImporter importer, IPatternAssetStore store, CancellationToken ct) =>
+api.MapPost("/imports", async (HttpRequest request, IRepository repo, IPatternImporter importer, IPatternAssetStore store, StitchDbContext db, CancellationToken ct) =>
 {
     var form = await request.ReadFormAsync(ct); var file = form.Files.GetFile("file") ?? throw new UserError("Choose a PDF to import.");
     if (file.Length == 0 || file.Length > maxUploadMb * 1024 * 1024 || !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) throw new UserError($"Choose a PDF no larger than {maxUploadMb} MB.");
@@ -182,7 +218,7 @@ api.MapPost("/imports", async (HttpRequest request, IRepository repo, IPatternIm
     if (!System.Text.Encoding.ASCII.GetString(bytes.Take(1024).ToArray()).Contains("%PDF-")) throw new UserError("This file does not appear to be a PDF.");
     var originalName = Path.GetFileName(file.FileName.Replace('\\', '/')); if (originalName.Length > 200) originalName = originalName[^200..];
     var asset = new PatternSourceAsset { OriginalFileName = originalName, ByteSize = bytes.Length, Sha256 = StorageKeys.Hash(bytes) };
-    var path = Path.Combine(Path.GetTempPath(), "stitch-import-" + Guid.NewGuid().ToString("N") + ".pdf");
+    var path = TemporaryFiles.CreatePath("import");
     try
     {
         await File.WriteAllBytesAsync(path, bytes, ct); PatternData data;
@@ -192,13 +228,11 @@ api.MapPost("/imports", async (HttpRequest request, IRepository repo, IPatternIm
             app.Logger.LogWarning("PDF import {AssetId} failed with {FailureType}", asset.Id, ex.GetType().Name);
             data = new() { Warnings = [new(ex is UserError ? ex.Message : "This PDF could not be read. It may be encrypted, damaged, or unsupported. The original is retained.")] };
         }
+        ContentLifetime.Queue(db, "source", asset.StorageKey, DateTimeOffset.UtcNow.AddHours(24));
         memory.Position = 0; await store.Put(asset.StorageKey, memory, asset.MediaType, ct);
-        try
-        {
-            var name = Path.GetFileNameWithoutExtension(originalName); name = name[..Math.Min(160, name.Length)];
-            return View(repo.Create(new(Guid.NewGuid().ToString("N"), name, null, data), asset: asset, imported: true), repo);
-        }
-        catch { await store.Delete(asset.StorageKey, CancellationToken.None); throw; }
+        var name = Path.GetFileNameWithoutExtension(originalName); name = name[..Math.Min(160, name.Length)];
+        // A failed/ambiguous commit is handled by the durable queue, which checks references before deleting.
+        return View(repo.Create(new(Guid.NewGuid().ToString("N"), name, null, data), asset: asset, imported: true), repo);
     }
     finally { if (File.Exists(path)) File.Delete(path); }
 });
@@ -224,4 +258,5 @@ api.MapFallback("/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 app.Run();
 public record PreferenceRequest(long Revision, System.Text.Json.JsonElement Values);
+public record AccountDeletion(string Confirmation);
 public partial class Program { }

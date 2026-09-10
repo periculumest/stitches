@@ -1,0 +1,45 @@
+**Data retention and deletion — implementation policy, September 9, 2026**
+
+This defines the application's starting policy and the facts for the forthcoming privacy policy. It is not a statement that all legal or Google verification requirements are complete. The public explanation is `/data-retention`; signed-in users can open **Account & data** to delete their account.
+
+| Data | Retention and deletion behavior |
+| --- | --- |
+| Projects, chart edits, progress and undo history | Retained until project/account deletion. Permanently removed from the live database in the deletion transaction. No trash or grace period; no inactivity purge. |
+| Imported pattern and original PDF, including unreadable imports | Retained while at least one project references the pattern. Last-project deletion removes the pattern, import record and source metadata, and queues the PDF for storage deletion. Other projects using the same pattern retain access. |
+| Existing daily/weekly ZIP archives | Any project deletion invalidates **all** of that owner's retained archives immediately, because they may contain deleted data. The next export/backup contains only remaining data. Downloaded copies cannot be recalled. |
+| Ordinary backup expiry | At most one latest daily archive, available for less than 7 days from creation, and one latest weekly archive, available for less than 30 days. Access expires at those limits even if the cleanup worker is unavailable; the worker deletes expired files. Scheduled backup generation still requires configured jobs. |
+| Account profile and Google association | **Delete my account** removes the application user, Identity login association, projects, patterns, PDFs, inventory, preferences, progress, import records and backup metadata. Other sessions are rejected on their next authenticated API/auth request. Signing in with Google again creates a new account. No Google access/refresh tokens are stored by the current sign-in implementation. This does not delete the user's Google account. |
+| Physical PDF/archive files | Normally deleted immediately after a successful user deletion; otherwise durable retries every 5 minutes while the app runs, or through `--cleanup`. Operational target: 24 hours after the deletion request, with failures remaining queued until success. This is an operational target, not an unconditional deadline during an outage. |
+| Unsuccessful uploads and backup candidates | A durable cleanup entry is created before upload. Successful database publication removes it atomically. Unreferenced candidates become eligible after 24 hours; cleanup checks live references before deleting. This also covers an ambiguous commit response. |
+| Temporary processing files | Normally removed on completion/disposal. Named files in the dedicated host staging directory become eligible after 24 hours; cleanup skips open files. Legacy staging locations need the one-time operator review below. |
+| Cleanup metadata | Store kind, random object key, queue/due times and attempt count only. Retained until cleanup succeeds; then removed. It contains no PDF, chart, name or email. |
+| Backup job receipts | Removed after 35 days, when backups are invalidated, or on account deletion. |
+| Downloaded or already-streaming copies | A request that has already obtained a stream may finish; files already delivered to user devices cannot be revoked by the app. |
+
+**Consistency and failure recovery**
+
+Project creation/deletion, account deletion, export assembly and backup publication use the same per-owner PostgreSQL advisory lock. A backup already being assembled finishes before deletion can succeed, and deletion then invalidates that archive. A later backup sees the remaining content. Duplicate-project creation rechecks that its source still exists under the lock.
+
+Live data removal, backup invalidation and file-deletion queue entries are committed together. Cleanup uses row locks and `SKIP LOCKED`, routes source and backup objects to their respective stores, and retries failures without making removed data accessible. A background worker runs on startup and every five minutes. Storage failures do not restore database records. A restored service resumes the persistent queue.
+
+Maintenance also removes pattern/source rows left unreferenced by the **old** project-delete implementation, and invalidates that owner's old archives. It preserves all referenced patterns and shared source assets. It does not delete a project merely because the import is unreadable.
+
+**Release and operations**
+
+1. Deploy the new code and apply migration `PredictableDeletion` with the normal `--migrate` command. Avoid mixed old/new writers: the old code does not participate in deletion locking. The migration preserves old pending backup deletions with the correct store kind and new timestamps.
+2. Run `dotnet server/bin/Release/net8.0/StitchHelper.dll --cleanup` in the configured application environment. This performs the legacy orphan sweep, backup expiry, file cleanup and host staging cleanup. Repeat at least every five minutes through an external job if the web host can scale to zero; an in-process worker cannot run on a stopped host.
+   Use `--retention-status` first for a read-only count of projects, orphan records and queued/overdue object deletions. Complete queued source deletions before downgrading the migration; its downgrade guard rejects a queue the old backup-only worker cannot safely process.
+3. Monitor retention/cleanup errors and queue age. `--cleanup` exits nonzero when attempted deletions remain overdue beyond 24 hours. Escalate storage permission, hold, or availability failures; never silently drop failed queue entries. Each cleanup batch processes at most 500 due objects.
+4. Check the private source/backup buckets before launch. Startup rejects versioning, default event holds, a bucket retention period, or soft-delete retention above seven days. Individual object holds, existing noncurrent generations, and objects already soft-deleted under an older policy require an operator audit. Changing a policy does not retroactively erase those copies. File recovery copies can remain for up to seven additional days under the supported configuration. Provider-internal media disposal is outside the application's deletion mechanism. [Google Cloud soft-delete documentation](https://docs.cloud.google.com/storage/docs/soft-delete) and [policy changes](https://docs.cloud.google.com/storage/docs/use-soft-delete).
+5. Review historical unreferenced storage objects and `.partial-*` files created **before** durable upload staging existed. They cannot reliably be identified from absent database rows alone, especially on shared storage. Compare an inventory of the app's dedicated storage against source/backup metadata and pending deletions, allow for in-flight operations, then remove verified leftovers. New partial local uploads are cleaned with their queued object. Also review old host temporary files named `stitch-import-*`, `stitch-export-*`, and `stitch-read-*`; the new worker deliberately limits automatic cleanup to its dedicated directory.
+
+**Items still needed for the full privacy/compliance pass**
+
+- Establish and verify **database/PITR backup retention and operational-log retention** with the deployed providers. These are not controlled by this feature. Do not publish a claim that every provider copy is erased within 24 hours. Account IDs may appear in historical operational logs.
+- Define a recovery procedure that reconciles deletions before restored infrastructure is made available. There is no automatic infrastructure-restore reconciliation or independent deletion ledger in this release; a database restored from before deletion can contain the old account/content. Do not restore it directly to serving traffic. Counsel and operations need to settle deletion-request records and any legal holds.
+- Provide the operator identity/contact, full privacy policy and terms, publicly accessible links and the matching OAuth consent-screen URLs. This retention page is a supporting disclosure, not a complete privacy policy. Google requires accurate and accessible disclosures covering Google user data. [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy) and [OAuth policies](https://developers.google.com/identity/protocols/oauth2/policies).
+- Have counsel review copyright/DMCA procedures and any exceptions to deletion. No legal-hold feature, DMCA case management, or automatic deletion when a user merely disconnects Google has been added. Signing out also does not delete account data.
+
+**Verification**
+
+Database tests cover last-project deletion, shared-source survival, isolation between owners, archive invalidation, clean exports, same-window backup replacement, deletion/storage failures and restart, historical orphan cleanup, expiry, abandoned uploads, stale duplicate creation, account erasure/CSRF/session invalidation, and a paused backup racing deletion. Browser tests cover public disclosure access, typed account confirmation, and project deletion through the UI.

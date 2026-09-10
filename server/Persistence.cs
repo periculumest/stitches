@@ -102,6 +102,10 @@ public class BackupJob
 public class PendingObjectDeletion
 {
     public string StorageKey { get; set; } = "";
+    public string StoreKind { get; set; } = "backup";
+    public DateTimeOffset QueuedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset NotBefore { get; set; } = DateTimeOffset.UtcNow;
+    public int Attempts { get; set; }
 }
 
 public class StitchDbContext(DbContextOptions<StitchDbContext> options)
@@ -148,7 +152,8 @@ public class StitchDbContext(DbContextOptions<StitchDbContext> options)
         b.Entity<ImportRecord>().HasOne<OwnedPattern>().WithMany().HasForeignKey(x => new { x.UserId, x.PatternId }).HasPrincipalKey(x => new { x.UserId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         b.Entity<BackupArtifact>().HasIndex(x => new { x.UserId, x.Kind }).IsUnique();
         b.Entity<BackupJob>().HasKey(x => new { x.UserId, x.Kind, x.ScheduleDate });
-        b.Entity<PendingObjectDeletion>().HasKey(x => x.StorageKey);
+        b.Entity<PendingObjectDeletion>().HasKey(x => new { x.StoreKind, x.StorageKey });
+        b.Entity<PendingObjectDeletion>().HasIndex(x => x.NotBefore);
         foreach (var type in new[] { typeof(OwnedPattern), typeof(OwnedProject), typeof(PatternSourceAsset), typeof(UserInventory), typeof(UserPreferences), typeof(ImportRecord), typeof(BackupArtifact), typeof(BackupJob) })
         {
             b.Entity(type).HasOne(typeof(ApplicationUser)).WithMany().HasForeignKey("UserId").OnDelete(DeleteBehavior.Cascade);

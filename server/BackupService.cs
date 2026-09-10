@@ -6,13 +6,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace StitchHelper;
 
-public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets, IBackupArtifactStore artifacts, ILogger<BackupService> logger)
+public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets, IBackupArtifactStore artifacts, ILogger<BackupService> logger, RetentionService? retention = null)
 {
     public const long MaxExportBytes = 2_000_000_000;
-    public List<BackupArtifact> List(Guid owner) => db.Backups.AsNoTracking().Where(x => x.UserId == owner).OrderBy(x => x.Kind).ToList();
-    public BackupArtifact Get(Guid owner, string id) => db.Backups.AsNoTracking().SingleOrDefault(x => x.Id == id && x.UserId == owner) ?? throw Repository.Missing();
+    private IQueryable<BackupArtifact> Available(Guid owner)
+    {
+        var dailyCutoff = DateTimeOffset.UtcNow.AddDays(-7); var weeklyCutoff = DateTimeOffset.UtcNow.AddDays(-30);
+        return db.Backups.AsNoTracking().Where(x => x.UserId == owner && (x.Kind == "daily" ? x.CreatedAt > dailyCutoff : x.CreatedAt > weeklyCutoff));
+    }
+    public List<BackupArtifact> List(Guid owner) => Available(owner).OrderBy(x => x.Kind).ToList();
+    public BackupArtifact Get(Guid owner, string id) => Available(owner).SingleOrDefault(x => x.Id == id) ?? throw Repository.Missing();
     public async Task<Stream> Download(Guid owner, string id, CancellationToken ct)
     {
+        await using var lease = await ContentLifetime.Acquire(db, owner, ct);
         var backup = Get(owner, id);
         var stream = await artifacts.Read(backup.StorageKey, ct);
         try
@@ -25,6 +31,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
     }
     public async Task<Stream> Export(Guid owner, string source = "current-export", CancellationToken ct = default)
     {
+        await using var lease = await ContentLifetime.Acquire(db, owner, ct);
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         var patterns = await db.Patterns.AsNoTracking().Where(x => x.UserId == owner).ToListAsync(ct);
         var projects = await db.Projects.AsNoTracking().Where(x => x.UserId == owner).ToListAsync(ct);
@@ -47,7 +54,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
             if (history.Data is not null) foreach (var c in history.Data.Definitions.SelectMany(x => x.GetComponents())) codes.Add(c.ThreadCode);
         }
         if (ownedAssets.Sum(x => x.ByteSize) > MaxExportBytes) throw new UserError("Your export exceeds the current 2 GB limit. Contact the operator for an assisted export.", 413);
-        var file = new FileStream(Path.Combine(Path.GetTempPath(), "stitch-export-" + Guid.NewGuid().ToString("N")), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+        var file = new FileStream(TemporaryFiles.CreatePath("export"), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
         try
         {
             var files = new Dictionary<string, string>(); var sections = new Dictionary<string, int>();
@@ -112,6 +119,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
     public async Task<bool> Retain(Guid owner, string kind, DateTimeOffset now, CancellationToken ct = default)
     {
         if (kind is not ("daily" or "weekly")) throw new ArgumentException("Use daily or weekly.", nameof(kind));
+        await using var lease = await ContentLifetime.Acquire(db, owner, ct);
         var date = DateOnly.FromDateTime(now.UtcDateTime);
         if (kind == "weekly") date = date.AddDays(-((int)date.DayOfWeek + 6) % 7); // Monday UTC
         await db.Database.OpenConnectionAsync(ct);
@@ -128,6 +136,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
                 await using var export = await Export(owner, kind, ct);
                 var candidate = new BackupArtifact { UserId = owner, Kind = kind, ScheduleDate = date, CreatedAt = now, ByteSize = export.Length, Sha256 = Convert.ToHexString(await SHA256.HashDataAsync(export, ct)).ToLowerInvariant() };
                 export.Position = 0;
+                ContentLifetime.Queue(db, "backup", candidate.StorageKey, DateTimeOffset.UtcNow.AddHours(24));
                 await artifacts.Put(candidate.StorageKey, export, "application/zip", ct);
                 var promoted = false;
                 try
@@ -141,10 +150,11 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
                     var previous = await db.Backups.SingleOrDefaultAsync(x => x.UserId == owner && x.Kind == kind, ct);
                     if (previous is not null)
                     {
-                        db.PendingObjectDeletions.Add(new() { StorageKey = previous.StorageKey });
+                        ContentLifetime.Queue(db, "backup", previous.StorageKey);
                         db.Backups.Remove(previous); await db.SaveChangesAsync(ct);
                     }
                     db.Backups.Add(candidate);
+                    await db.PendingObjectDeletions.Where(d => d.StoreKind == "backup" && d.StorageKey == candidate.StorageKey).ExecuteDeleteAsync(ct);
                     db.BackupJobs.Add(new() { UserId = owner, Kind = kind, ScheduleDate = date, CompletedAt = now });
                     await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); promoted = true;
                     logger.LogInformation("Backup {Kind} succeeded for user {UserId}", kind, owner);
@@ -169,12 +179,5 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
         }
         finally { await db.Database.CloseConnectionAsync(); }
     }
-    public async Task Cleanup(CancellationToken ct)
-    {
-        foreach (var item in await db.PendingObjectDeletions.AsNoTracking().ToListAsync(ct))
-        {
-            try { await artifacts.Delete(item.StorageKey, ct); await db.PendingObjectDeletions.Where(x => x.StorageKey == item.StorageKey).ExecuteDeleteAsync(ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Superseded backup cleanup will retry"); }
-        }
-    }
+    public Task Cleanup(CancellationToken ct) => (retention ?? new RetentionService(db, assets, artifacts, Microsoft.Extensions.Logging.Abstractions.NullLogger<RetentionService>.Instance)).Cleanup(ct);
 }

@@ -66,7 +66,7 @@ The importer must produce candidate stitch definitions containing, where detecta
 
 Source symbols should be preserved where possible.
 
-If a usable source symbol is unavailable, the model must support a generated symbol.
+If a usable source symbol is unavailable, automatically assign an unused display symbol and record the replacement in the import notes. Reserve existing symbols across the whole key, and use the same replacement for every stitch with that definition. Preserve its thread mapping and strand counts. An unavailable symbol shape must not block import; an unknown thread mapping still requires review.
 
 ### FR-08 — Stitch types
 

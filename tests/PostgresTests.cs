@@ -86,7 +86,7 @@ public class PostgresTests : IDisposable
     {
         using var db = database.Open(); var repo = database.Repo(db); var p = repo.Create(SamplePattern.Create(), status: "active");
         using var second = database.Open(); Assert.Equal(p.Id, database.Repo(second).Get(p.Id).Id);
-        Assert.Empty(second.Database.GetPendingMigrations()); Assert.Equal(454, second.Catalog.Count());
+        Assert.Empty(second.Database.GetPendingMigrations()); Assert.Equal(489, second.Catalog.Count());
         second.Projects.Add(new() { Id = Guid.NewGuid().ToString("N"), UserId = database.B, PatternId = p.PatternId });
         Assert.Throws<DbUpdateException>(() => second.SaveChanges());
     }

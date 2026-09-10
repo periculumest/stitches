@@ -79,7 +79,18 @@ public class CrossStitchProfessionalImportTests
     public void AmbiguousOrIncompleteChartsAreRejected(string variant, string error)
         => WithFixture(variant, path => Assert.Contains(error, Assert.Throws<UserError>(() => new PdfImporter().Parse(path, DomainTests.Catalog())).Message));
 
-    private static void WithFixture(string variant, Action<string> check)
+    [Fact]
+    public void ProfessionalLegendResolvesPaddedSingleDigitColors()
+    {
+        WithFixture("normal", path => {
+            var data = new PdfImporter().Parse(path, DomainTests.Catalog());
+            Assert.Equal("5", data.Definitions[0].ThreadCode);
+            Assert.Equal(2, Assert.Single(data.Definitions[0].GetComponents()).StrandCount);
+            ProjectCommands.Execute(new Project { Data = data }, new(0, "confirm"), DomainTests.Catalog());
+        }, "05");
+    }
+
+    private static void WithFixture(string variant, Action<string> check, string firstCode = "310")
     {
         var builder = new PdfDocumentBuilder();
         var text = builder.AddStandard14Font(Standard14Font.Helvetica);
@@ -96,7 +107,7 @@ public class CrossStitchProfessionalImportTests
             key.AddText("No.", 8, new PdfPoint(100 + shift, 320), text);
             key.AddText("Colour Name", 8, new PdfPoint(150 + shift, 320), text);
             key.AddText(column == 0 ? "X" : "Y", 9, new PdfPoint(35 + shift, 298.6), symbol);
-            if (variant != "missing-code" || column != 0) key.AddText(column == 0 ? "310" : "321", 8, new PdfPoint(100 + shift, 300), text);
+            if (variant != "missing-code" || column != 0) key.AddText(column == 0 ? firstCode : "321", 8, new PdfPoint(100 + shift, 300), text);
             key.AddText(column == 0 ? "Black" : "Red", 8, new PdfPoint(150 + shift, 300), text);
         }
         for (var tile = 0; tile < (variant == "missing-page" ? 1 : 2); tile++)

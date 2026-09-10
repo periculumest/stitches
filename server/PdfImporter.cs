@@ -57,6 +57,7 @@ public class PdfImporter : IPatternImporter
             }
         }
         var offsetY = 0;
+        var definitionsBySource = new Dictionary<string, StitchDefinition>();
         foreach (var grid in grids)
         {
             var width = grid.X.Length - 1; var height = grid.Y.Length - 1;
@@ -69,14 +70,16 @@ public class PdfImporter : IPatternImporter
                 var x = Cell(grid.X, cx); var y = height - 1 - Cell(grid.Y, cy);
                 if (x < 0 || x >= width || y < 0 || y >= height) continue;
                 if (!occupied.Add((x, y))) { result.Warnings.Add(new("Multiple glyphs occupy one cell. Check this stitch against the PDF.", grid.Page.Number, x, y + offsetY)); continue; }
-                var symbol = letter.Value.Length <= 4 && !letter.Value.Any(char.IsControl) ? letter.Value : "?";
-                var definition = result.Definitions.FirstOrDefault(d => d.Symbol == symbol);
+                var symbol = letter.Value;
+                var sourceKey = ChartTableImporter.SymbolKey(letter);
+                definitionsBySource.TryGetValue(sourceKey, out var definition);
                 if (definition is null)
                 {
                     var definitionId = $"d{result.Definitions.Count}";
                     var composition = mappings.TryGetValue(symbol, out var expression) ? ThreadUsageParser.Parse(expression, definitionId, catalog) : [new ThreadUsageComponent(definitionId + "-c0", "UNKNOWN")];
                     definition = new(definitionId, symbol, composition[0].ThreadCode, Components: composition);
                     result.Definitions.Add(definition);
+                    definitionsBySource[sourceKey] = definition;
                     if (composition.Any(c => !catalog.ContainsKey(c.ThreadCode))) result.Warnings.Add(new($"Assign catalog threads to every component of symbol {symbol}.", grid.Page.Number, x, y + offsetY));
                 }
                 result.Stitches.Add(new($"p{grid.Page.Number}-{x}-{y}", x, y + offsetY, definition.Id));
@@ -92,6 +95,7 @@ public class PdfImporter : IPatternImporter
         if (omitted.Length > 0) result.Warnings.Add(new($"No chart extracted from page(s) {string.Join(", ", omitted)}. Check these pages for additional charts or specialty stitches."));
         result.Warnings.Add(new("Review the entire chart and key. Automatic extraction reads text symbols as full crosses; fractional stitches, drawn symbols, backstitch, knots, and beads need manual checking."));
         foreach (var entry in mappings.Where(m => result.Definitions.All(d => d.Symbol != m.Key))) result.Warnings.Add(new($"Key symbol {entry.Key} was not found in the chart."));
+        ImportSymbols.AssignMissing(result);
         return result;
     }
     private static bool Inside(Letter l, Grid g)

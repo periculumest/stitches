@@ -10,7 +10,7 @@ public interface IRepository
     Project? GetState(string id, long? revision);
     List<Project> List();
     Pattern GetPattern(string id);
-    Project Create(Pattern pattern, string? name = null, string status = "audit", PatternSourceAsset? asset = null, bool imported = false);
+    Project Create(Pattern pattern, string? name = null, string status = "audit", PatternSourceAsset? asset = null, bool imported = false, bool requireExisting = false);
     Project Execute(string id, Command command);
     Project Progress(string id, ProgressBatch batch);
     void Delete(string id);
@@ -73,10 +73,12 @@ public class Repository(StitchDbContext db, ICurrentUserContext current) : IRepo
         return db.Assets.AsNoTracking().SingleOrDefault(a => a.Id == pattern.SourceFile && a.UserId == Owner) ?? throw Missing();
     }
     public Dictionary<string, ThreadEntry> Catalog() => db.Catalog.AsNoTracking().Select(x => x.Json).ToList().Select(Json.Read<ThreadEntry>).ToDictionary(t => t.Code);
-    public Project Create(Pattern pattern, string? name = null, string status = "audit", PatternSourceAsset? asset = null, bool imported = false)
+    public Project Create(Pattern pattern, string? name = null, string status = "audit", PatternSourceAsset? asset = null, bool imported = false, bool requireExisting = false)
     {
         using var tx = db.Database.BeginTransaction();
+        ContentLifetime.Lock(db, Owner);
         var existing = db.Patterns.AsNoTracking().SingleOrDefault(x => x.Id == pattern.Id);
+        if (requireExisting && existing is null) throw Missing();
         if (existing is not null && existing.UserId != Owner) throw Missing();
         if (existing is null)
         {
@@ -93,7 +95,9 @@ public class Repository(StitchDbContext db, ICurrentUserContext current) : IRepo
         else pattern = GetPattern(pattern.Id);
         var project = new Project { PatternId = pattern.Id, Name = name ?? pattern.Name, Status = status, Data = Json.Copy(pattern.Data) };
         db.Projects.Add(new() { Id = project.Id, UserId = Owner, PatternId = pattern.Id, DataJson = Json.Write(project.Data), StateJson = State(project) });
-        db.SaveChanges(); tx.Commit(); db.ChangeTracker.Clear(); return project;
+        db.SaveChanges();
+        if (asset is not null) db.PendingObjectDeletions.Where(d => d.StoreKind == "source" && d.StorageKey == asset.StorageKey).ExecuteDelete();
+        tx.Commit(); db.ChangeTracker.Clear(); return project;
     }
     private static string State(Project p) => Json.Write(new { p.Id, p.PatternId, p.Name, p.Status, p.Substitutions, p.Milestones, p.WorkingArea, p.Undo, p.Redo });
     public Project Execute(string id, Command command)
@@ -153,7 +157,12 @@ public class Repository(StitchDbContext db, ICurrentUserContext current) : IRepo
     }
     public void Delete(string id)
     {
+        using var tx = db.Database.BeginTransaction();
+        ContentLifetime.Lock(db, Owner);
         if (OwnedProjects.Where(x => x.Id == id).ExecuteDelete() == 0) throw Missing();
+        ContentLifetime.RemoveUnreferenced(db, Owner);
+        ContentLifetime.InvalidateBackups(db, Owner);
+        tx.Commit(); db.ChangeTracker.Clear();
     }
     public List<InventoryEntry> Inventory() => db.Inventory.AsNoTracking().Where(x => x.UserId == Owner).Select(x => new InventoryEntry(x.Code, x.BobbinCount, x.Location, x.Revision)).ToList();
     public InventoryEntry SaveInventory(InventoryEntry entry)

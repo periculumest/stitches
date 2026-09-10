@@ -40,7 +40,9 @@ There is no guest login or SQLite fallback. Old local SQLite data is not migrate
 7. Record bobbin counts and locations in **Thread collection**.
 8. Use **Backups & Export** to download current data or the latest retained daily/weekly archive. Automatic backups require the operator's scheduled jobs.
 
-The 454-color DMC catalog in `data/thread-catalog/rgb-dmc.json` is shared reference data, refreshed by the migration/release command. Users' inventory is private. Screen colors may differ from physical floss.
+Project deletion is permanent. Deleting the last project using a pattern also removes its source PDF, and any project deletion invalidates existing retained backups. Account deletion is available under **Account & data**. See [retention and deletion](docs/DATA-RETENTION.md) for cleanup retries, archive expiry, deployment steps, and the infrastructure policies still needed for the full privacy policy. The public explanation is `/data-retention`.
+
+The 489-color DMC catalog in `data/thread-catalog/rgb-dmc.json` is shared reference data, refreshed by the migration/release command. It includes DMC 1–35 from the supplied `MissingColors.xlsx`, using the workbook's names and swatch RGB values. Numeric codes ignore leading zeros, so patterns using `05` resolve to DMC `5`. Users' inventory is private. Screen colors may differ from physical floss.
 
 ## Import support
 

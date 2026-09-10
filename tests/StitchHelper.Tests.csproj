@@ -8,4 +8,5 @@
     <ProjectReference Include="../server/StitchHelper.csproj" />
   </ItemGroup>
   <ItemGroup><Compile Remove="TestSupport/**/*.cs" /></ItemGroup>
+  <ItemGroup><None Include="../data/thread-catalog/sources/MissingColors.xlsx" Link="MissingColors.xlsx" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

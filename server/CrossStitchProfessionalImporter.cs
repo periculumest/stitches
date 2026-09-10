@@ -56,7 +56,6 @@ public static class CrossStitchProfessionalImporter
                 var glyph = ChartTableImporter.ExtractGlyph(letter);
                 definitions[key] = new(id, letter.Value, code, "FullCross", glyph, [new(id + "-c0", code, strands)]);
                 if (!catalog.ContainsKey(code)) result.Warnings.Add(new($"DMC {code} is not in the thread catalog. Assign a thread before starting.", page.Number));
-                if (glyph is null) result.Warnings.Add(new($"The source symbol shape for DMC {code} could not be preserved. Check the text symbol against the PDF.", page.Number));
             }
         }
         if (definitions.Count == 0) throw new UserError("No readable Sym/No./Colour Name legend was found in this Cross Stitch Professional chart.");
@@ -117,7 +116,8 @@ public static class CrossStitchProfessionalImporter
         }
         result.Definitions = definitions.Values.ToList(); result.Stitches = occupied.Values.ToList();
         result.Warnings.Add(new($"Assembled {result.Pages.Count} chart pages using one-based printed coordinates and verified coverage of the {width} × {height} design; removed {overlaps:N0} matching overlap stitches."));
-        result.Warnings.Add(new($"Read {definitions.Count} DMC symbols from the column-based key and preserved their source shapes. Review the chart before starting; this adapter imports full crosses."));
+        ImportSymbols.AssignMissing(result, requireSourceGlyph: true);
+        result.Warnings.Add(new($"Read {definitions.Count} DMC symbols from the column-based key and preserved their source shapes where available. Review the chart before starting; this adapter imports full crosses."));
         if (strands is null) result.Warnings.Add(new("No explicit cross-stitch strand count was found; strand counts remain unspecified."));
         return result;
     }

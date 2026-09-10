@@ -1,0 +1,51 @@
+flowchart TD
+    A["1. User creates or obtains a PDF<br/>Ownership, purchase terms, third-party artwork"]
+    B["2. User uploads PDF<br/>Permission to process; restrictions and DMCA 1201"]
+    C["3. Extract chart and symbols<br/>Reproduction, adaptation, attribution and DMCA 1202"]
+    D["Original PDF retained privately<br/>Also retained when parsing fails"]
+    E["4. Private interactive pattern<br/>Review, edit colors and symbols, track progress"]
+    F["5. Copies and downloads<br/>Original PDF; ZIP with PDF, chart data and history"]
+    G["Scheduled backup jobs, when configured<br/>Latest daily ZIP expires after 7 days;<br/>latest weekly ZIP after 30 days"]
+    H["6. User deletes project"]
+    I["Remove project, progress and edits<br/>Invalidate all of the user's retained backups"]
+    L{"Another project uses this pattern?"}
+    M["Keep shared pattern and PDF<br/>Available to remaining projects"]
+    N["Remove pattern and source records<br/>Exclude from new exports and backups"]
+    O["User confirms account deletion"]
+    P["Remove profile and all account data<br/>Invalidate sessions and retained backups"]
+    Q["Delete stored PDFs and archives<br/>Durable retries every 5 minutes while running;<br/>24-hour operational target"]
+    R["Remaining infrastructure review<br/>Database backups, logs, historical recovery copies<br/>and deletion reconciliation before restoration"]
+    J["7. Possible future feature<br/>Generate a new PDF or share a pattern<br/>Review output rights and required notices"]
+    K["DMCA 512 process to design with counsel<br/>Agent, notices, counter-notices,<br/>repeat infringers and affected copies"]
+
+    A --> B
+    B --> C
+    B --> D
+    C --> E
+    D --> F
+    E --> F
+    D --> G
+    E --> G
+    G --> F
+    E --> H
+    H --> I
+    I --> L
+    I -->|Invalidated archive files| Q
+    L -->|Yes| M
+    L -->|No| N
+    N -->|Unused PDF files| Q
+    O --> P
+    P -->|All account PDF and archive files| Q
+    G -->|Expired archive files| Q
+    Q -.-> R
+    E -.-> J
+    K -.-> D
+    K -.-> E
+    K -.-> F
+
+    classDef deletion fill:#edf7ee,stroke:#54805b,color:#233f28;
+    classDef review fill:#fff8df,stroke:#aa8730,color:#443917;
+    classDef current fill:#edf4fa,stroke:#537b98,color:#1e3444;
+    class A,B,C,D,E,F,G current;
+    class H,I,L,M,N,O,P,Q deletion;
+    class J,K,R review;

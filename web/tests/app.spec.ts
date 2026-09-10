@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 
 test('inventory uses the supplied full DMC catalog and RGB colors', async ({ page, request }) => {
   const catalog = await (await request.get('/api/catalog')).json();
-  expect(catalog).toHaveLength(454);
+  expect(catalog).toHaveLength(489);
   expect(catalog.find((t: { code: string }) => t.code === '309').displayColor).toBe('#564A4A');
   await page.goto('/');
   await page.getByRole('button', { name: 'Thread collection', exact: true }).click();

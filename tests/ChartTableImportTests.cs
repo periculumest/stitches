@@ -55,7 +55,18 @@ public class ChartTableImportTests
         WithFixture(true, path => Assert.Contains("Repeated stitches disagree", Assert.Throws<UserError>(() => new PdfImporter().Parse(path, Catalog())).Message));
     }
 
-    private static void WithFixture(bool conflict, Action<string> check)
+    [Fact]
+    public void TabularLegendResolvesPaddedSingleDigitColors()
+    {
+        WithFixture(false, path => {
+            var data = new PdfImporter().Parse(path, Catalog());
+            Assert.Equal("5", data.Definitions[0].ThreadCode);
+            Assert.Equal(2, Assert.Single(data.Definitions[0].GetComponents()).StrandCount);
+            ProjectCommands.Execute(new Project { Data = data }, new(0, "confirm"), Catalog());
+        }, "05");
+    }
+
+    private static void WithFixture(bool conflict, Action<string> check, string firstCode = "310")
     {
         var builder = new PdfDocumentBuilder(); var text = builder.AddStandard14Font(Standard14Font.Helvetica); var symbol = builder.AddStandard14Font(Standard14Font.Courier);
         var legend = builder.AddPage(350, 260);
@@ -64,7 +75,7 @@ public class ChartTableImportTests
             var y = 200 - row * 12;
             legend.AddText(row == 0 ? "X" : "Y", 9, new PdfPoint(45, y + 1.4), symbol);
             legend.AddText("2", 8, new PdfPoint(100, y), text); legend.AddText("DMC", 8, new PdfPoint(140, y), text);
-            legend.AddText(row == 0 ? "310" : "321", 8, new PdfPoint(180, y), text); legend.AddText(row == 0 ? "Black" : "Red", 8, new PdfPoint(240, y), text);
+            legend.AddText(row == 0 ? firstCode : "321", 8, new PdfPoint(180, y), text); legend.AddText(row == 0 ? "Black" : "Red", 8, new PdfPoint(240, y), text);
         }
         for (var tile = 0; tile < 2; tile++) {
             var page = builder.AddPage(300, 260); var offset = tile * 17;

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StitchHelper;
@@ -11,9 +12,11 @@ using StitchHelper;
 namespace StitchHelper.Migrations
 {
     [DbContext(typeof(StitchDbContext))]
-    partial class StitchDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260910024450_VersionedLegalDocuments")]
+    partial class VersionedLegalDocuments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -171,24 +174,6 @@ namespace StitchHelper.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
-            modelBuilder.Entity("StitchHelper.AnnouncementDismissal", b =>
-                {
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AnnouncementId")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("DismissedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserId", "AnnouncementId");
-
-                    b.HasIndex("AnnouncementId");
-
-                    b.ToTable("AnnouncementDismissal");
-                });
-
             modelBuilder.Entity("StitchHelper.ApplicationUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -321,97 +306,6 @@ namespace StitchHelper.Migrations
                     b.ToTable("BackupJobs");
                 });
 
-            modelBuilder.Entity("StitchHelper.BetaAnnouncement", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("Active")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("Dismissible")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset?>("EndsAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LinkText")
-                        .HasColumnType("text");
-
-                    b.Property<string>("LinkUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("StartsAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("BetaAnnouncement");
-                });
-
-            modelBuilder.Entity("StitchHelper.BetaAuditEvent", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("AdminUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("TargetId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("BetaAuditEvent");
-                });
-
-            modelBuilder.Entity("StitchHelper.BetaRelease", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<string>("BodyMarkdown")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateOnly>("ReleaseDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("BetaRelease");
-                });
-
             modelBuilder.Entity("StitchHelper.CatalogItem", b =>
                 {
                     b.Property<string>("Code")
@@ -426,127 +320,6 @@ namespace StitchHelper.Migrations
                     b.ToTable("Catalog");
                 });
 
-            modelBuilder.Entity("StitchHelper.FeedbackAttachment", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<string>("AssetId")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("FeedbackSubmissionId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<byte[]>("Screenshot")
-                        .HasColumnType("bytea");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AssetId");
-
-                    b.HasIndex("FeedbackSubmissionId");
-
-                    b.ToTable("FeedbackAttachment");
-                });
-
-            modelBuilder.Entity("StitchHelper.FeedbackSubmission", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<string>("AppVersion")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("BrowserMetadata")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CompletedByAdminUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("CorrelationId")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("DiagnosticsDisclosureVersion")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("DiagnosticsIncluded")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("ErrorCode")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ImportMetadata")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ImportRunId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("PatternAttachmentConsentAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("PatternRevisionId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("PayloadHash")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProjectId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Route")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ScreenMetadata")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("SubmissionKey")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Status", "CreatedAt");
-
-                    b.HasIndex("UserId", "SubmissionKey")
-                        .IsUnique();
-
-                    b.ToTable("FeedbackSubmission");
-                });
-
             modelBuilder.Entity("StitchHelper.ImportRecord", b =>
                 {
                     b.Property<string>("Id")
@@ -554,10 +327,6 @@ namespace StitchHelper.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ParserVersion")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<string>("PatternId")
                         .IsRequired()
@@ -884,22 +653,6 @@ namespace StitchHelper.Migrations
                     b.ToTable("Inventory");
                 });
 
-            modelBuilder.Entity("StitchHelper.UserOnboardingState", b =>
-                {
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("CompletedOnboardingVersion")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("CompletedOrDismissedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserId");
-
-                    b.ToTable("UserOnboardingState");
-                });
-
             modelBuilder.Entity("StitchHelper.UserPreferences", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -971,21 +724,6 @@ namespace StitchHelper.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("StitchHelper.AnnouncementDismissal", b =>
-                {
-                    b.HasOne("StitchHelper.BetaAnnouncement", null)
-                        .WithMany()
-                        .HasForeignKey("AnnouncementId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StitchHelper.ApplicationUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("StitchHelper.BackupArtifact", b =>
                 {
                     b.HasOne("StitchHelper.ApplicationUser", null)
@@ -996,29 +734,6 @@ namespace StitchHelper.Migrations
                 });
 
             modelBuilder.Entity("StitchHelper.BackupJob", b =>
-                {
-                    b.HasOne("StitchHelper.ApplicationUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("StitchHelper.FeedbackAttachment", b =>
-                {
-                    b.HasOne("StitchHelper.PatternSourceAsset", null)
-                        .WithMany()
-                        .HasForeignKey("AssetId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("StitchHelper.FeedbackSubmission", null)
-                        .WithMany()
-                        .HasForeignKey("FeedbackSubmissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("StitchHelper.FeedbackSubmission", b =>
                 {
                     b.HasOne("StitchHelper.ApplicationUser", null)
                         .WithMany()
@@ -1133,15 +848,6 @@ namespace StitchHelper.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("StitchHelper.ApplicationUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("StitchHelper.UserOnboardingState", b =>
-                {
                     b.HasOne("StitchHelper.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")

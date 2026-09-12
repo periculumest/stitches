@@ -43,3 +43,7 @@ Maintenance also removes pattern/source rows left unreferenced by the **old** pr
 **Verification**
 
 Database tests cover last-project deletion, shared-source survival, isolation between owners, archive invalidation, clean exports, same-window backup replacement, deletion/storage failures and restart, historical orphan cleanup, expiry, abandoned uploads, stale duplicate creation, account erasure/CSRF/session invalidation, and a paused backup racing deletion. Browser tests cover public disclosure access, typed account confirmation, and project deletion through the UI.
+
+**Versioned legal documents**
+
+Account-level legal acceptance receipts are retained until account deletion, included with exact accepted snapshots in portable exports and app backups, and cascade-deleted with the account. Shared published legal versions remain as public history. There is no separate post-deletion evidence-retention policy. See [docs/legal](legal/README.md) for publishing, acceptance enforcement, and the remaining infrastructure restore limitations.

@@ -1,0 +1,97 @@
+.modal.feedback-details {
+  width: min(920px, calc(100vw - 40px)); max-width: none; max-height: min(900px, 90dvh);
+  padding: 0; border: 1px solid #dedfd4; border-radius: 20px; background: #fcfbf7;
+  color: #344438; box-shadow: 0 28px 100px #172e3650; overflow: hidden;
+}
+.feedback-details[open] { display: flex; flex-direction: column; }
+.feedback-details::backdrop { background: #20352c70; backdrop-filter: blur(5px); }
+.feedback-details * { box-sizing: border-box; }
+.feedback-details button, .feedback-details a { -webkit-tap-highlight-color: transparent; }
+.feedback-details button:focus-visible, .feedback-details a:focus-visible, .feedback-details summary:focus-visible { outline: 3px solid #7b9f82; outline-offset: 3px; }
+.feedback-details button:disabled { opacity: .45; cursor: default; }
+.feedback-header { display: flex; align-items: center; gap: 14px; padding: 25px 30px; border-bottom: 1px solid #e6e7de; flex-shrink: 0; }
+.feedback-heading-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: #eaf0e5; color: #496647; }
+.feedback-details .feedback-eyebrow { margin: 0 0 3px; color: #73816d; text-transform: uppercase; font-size: 10px; letter-spacing: .15em; font-weight: 700; }
+.feedback-details h2 { margin: 0; font-size: 28px; line-height: 1.2; font-weight: 400; }
+.feedback-close { display: grid; place-items: center; margin-left: auto; width: 36px; height: 36px; border-radius: 50%; color: #6d776a; }
+.feedback-close:hover { background: #edf0e8; }
+.feedback-body { padding: 24px 30px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.feedback-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+.feedback-tags { display: flex; align-items: center; gap: 8px; }
+.feedback-status, .feedback-category { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; line-height: 1.5; border-radius: 6px; font-weight: 600; }
+.feedback-status { color: #7f6229; background: #f6ecd3; }
+.feedback-status > span { width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
+.feedback-status-read { color: #496777; background: #e7eef2; }
+.feedback-status-completed { color: #42613e; background: #e6eedf; }
+.feedback-status-archived { color: #676b63; background: #ebede7; }
+.feedback-category { color: #687160; background: #f0f0e9; font-weight: 400; }
+.feedback-reference { font-size: 12px; color: #7a8074; font-family: ui-monospace, monospace; }
+.feedback-layout { display: grid; grid-template-columns: minmax(0, 1fr) 224px; gap: 28px; }
+.feedback-main { min-width: 0; }
+.feedback-details h3 { font: 600 12px/1.5 'Segoe UI', sans-serif; letter-spacing: .02em; margin: 0 0 14px; color: #667360; }
+.feedback-message-card { padding: 22px; border: 1px solid #e3e5d9; border-radius: 12px; background: #fffefa; box-shadow: 0 3px 8px #33472e04; }
+.feedback-details .feedback-message { margin: 0; font-size: 15px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; color: #354136; }
+.feedback-details dl { margin: 0; }
+.feedback-field { min-width: 0; margin-bottom: 17px; }
+.feedback-field:last-child { margin-bottom: 0; }
+.feedback-details dt { font-size: 11px; color: #7c8375; margin-bottom: 4px; }
+.feedback-details dd { margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.feedback-details code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.feedback-context { padding: 4px 0; min-width: 0; }
+.feedback-completion { display: flex; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e3e6da; color: #4b6744; }
+.feedback-completion strong, .feedback-completion span { display: block; font-size: 12px; }
+.feedback-completion span { margin-top: 3px; color: #737d6d; }
+.feedback-attachments { margin-top: 24px; }
+.feedback-attachments h3 { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.feedback-attachments h3 > span { border: 1px solid #dce1d3; border-radius: 5px; font-size: 10px; padding: 0 5px; }
+.feedback-details .feedback-hint, .feedback-details .feedback-empty { color: #77806f; font-size: 12px; line-height: 1.6; margin: 0 0 12px; }
+.feedback-attachment-list { display: grid; gap: 8px; }
+.feedback-attachment { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid #e3e5db; border-radius: 10px; background: #fffefa; }
+.feedback-file-icon { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 40px; color: #7a876e; background: #f0f2e9; border-radius: 6px; }
+.feedback-attachment > div { min-width: 0; }
+.feedback-attachment strong { display: block; font-size: 12px; font-weight: 600; }
+.feedback-attachment div > span { display: block; font-size: 11px; color: #7a8173; margin-top: 2px; }
+.feedback-attachment a { display: flex; align-items: center; gap: 3px; margin-left: auto; padding: 8px 0 8px 6px; font-size: 12px; font-weight: 600; text-decoration: none; color: #41613e; flex-shrink: 0; }
+.feedback-attachment a:hover { text-decoration: underline; }
+.feedback-details .feedback-diagnostics { margin: 26px 0 0; padding: 0; border: 1px solid #e3e5da; border-radius: 10px; }
+.feedback-diagnostics summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 14px 16px; list-style: none; font-size: 12px; font-weight: 600; }
+.feedback-diagnostics summary::-webkit-details-marker { display: none; }
+.feedback-diagnostics[open] summary > svg { transform: rotate(90deg); }
+.feedback-diagnostics-summary { margin-left: auto; font-size: 11px; color: #798270; font-weight: 400; }
+.feedback-diagnostics-content { padding: 0 16px 18px; }
+.feedback-diagnostics-content dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 26px; }
+.feedback-diagnostics-content .feedback-field { margin: 0; }
+.feedback-footer { flex-shrink: 0; padding: 16px 30px 22px; border-top: 1px solid #e3e6da; background: #f5f6ef; }
+.feedback-footer p { margin: 0 0 12px; font-size: 11px; color: #7a8171; }
+.feedback-status-actions, .feedback-resolution-actions { display: flex; align-items: center; gap: 10px; }
+.feedback-resolution-actions { margin-left: auto; }
+.feedback-status-actions button { display: inline-flex; justify-content: center; align-items: center; gap: 7px; padding: 11px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; min-height: 42px; }
+.feedback-status-actions .feedback-primary { background: #3d5c43; color: #fffefa; border: 1px solid #3d5c43; }
+.feedback-status-actions .feedback-primary:hover:enabled { background: #2e4b34; }
+.feedback-status-actions .feedback-secondary { border: 1px solid #d6ddcd; background: #fffefa; color: #53664c; }
+.feedback-status-actions .feedback-archive { color: #747d6c; padding-left: 0; }
+.feedback-status-actions .feedback-secondary:hover:enabled, .feedback-status-actions .feedback-archive:hover:enabled { background: #e8eddf; }
+.feedback-details .feedback-error { background: #fbebe7; color: #993d30; border: 1px solid #ebc7be; border-radius: 8px; padding: 12px 16px; font-size: 13px; }
+@media (max-width: 680px) {
+  .modal.feedback-details { width: calc(100vw - 20px); max-height: 94dvh; border-radius: 15px; }
+  .feedback-header { padding: 18px; gap: 10px; }
+  .feedback-details h2 { font-size: 24px; }
+  .feedback-heading-icon { width: 40px; height: 40px; }
+  .feedback-body { padding: 20px 18px; }
+  .feedback-layout { grid-template-columns: 1fr; gap: 22px; }
+  .feedback-message-card { padding: 18px; }
+  .feedback-context { border-top: 1px solid #e3e6da; padding-top: 20px; }
+  .feedback-context dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .feedback-context .feedback-field { margin: 0; }
+  .feedback-diagnostics summary { flex-wrap: wrap; gap: 6px; }
+  .feedback-diagnostics-summary { width: 100%; margin-left: 23px; }
+  .feedback-diagnostics-content dl { grid-template-columns: 1fr; }
+  .feedback-footer { padding: 14px 18px 18px; }
+  .feedback-status-actions { flex-wrap: wrap; }
+  .feedback-status-actions button { padding: 10px 12px; }
+  .feedback-resolution-actions { gap: 7px; }
+}
+@media (max-width: 370px) {
+  .feedback-resolution-actions { width: 100%; }
+  .feedback-resolution-actions button { flex: 1; }
+}

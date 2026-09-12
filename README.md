@@ -81,6 +81,7 @@ Live Google login, cloud storage, and complete container replacement must be reh
 
 ## Documentation
 
+- [Beta experience implementation decisions and operator setup](docs/preprod/01-IMPLEMENTATION-DECISIONS.md)
 - [Phase 2 implementation decisions](<docs/phase 2/IMPLEMENTATION-DECISIONS.md>)
 - [Preproduction setup and release checklist](<docs/phase 2/PREPROD-READINESS.md>)
 - [Phase 2 validation evidence and outstanding gates](<docs/phase 2/VALIDATION.md>)

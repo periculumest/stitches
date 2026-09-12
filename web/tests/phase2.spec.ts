@@ -63,7 +63,7 @@ test('sign-in gate and logout clear the private workspace', async ({ page, brows
     await expect(tab.getByRole('heading', { name: 'My projects' })).toHaveCount(0);
     await tab.screenshot({ path: '../artifacts/phase2-signin.png', fullPage: true });
   } finally { await anonymous.close(); }
-  await page.goto('/'); await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /^Account menu for / }).click(); await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('link', { name: /Continue with Google/ })).toBeVisible();
   expect(await page.evaluate(async () => (await fetch('/api/projects')).status)).toBe(401);
 });

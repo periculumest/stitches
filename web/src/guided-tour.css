@@ -1,0 +1,34 @@
+.guided-tour-target {
+  outline: 3px solid #b07b25 !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 0 7px #efd08966 !important;
+  scroll-margin: 110px 16px;
+}
+.guided-tour {
+  position: fixed;
+  z-index: 200;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #c5ac79;
+  border-radius: 12px;
+  background: #fffdf6;
+  color: #343d34;
+  box-shadow: 0 8px 32px #243c2533;
+  text-align: left;
+}
+.guided-tour-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guided-tour-heading span { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: #765520; }
+.guided-tour-heading button { min-width: 28px; min-height: 28px; }
+.guided-tour h2 { font-size: 23px; margin: 8px 0; }
+.guided-tour p { font-size: 13px; line-height: 1.6; margin: 8px 0 14px; }
+.guided-tour .guided-tour-wait { padding: 8px; border-radius: 6px; background: #f4eedf; }
+.guided-tour-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.guided-tour-actions button { font-size: 12px; min-height: 32px; padding: 4px 0; color: #385b46; text-decoration: underline; }
+.guided-tour-actions .primary { padding: 8px 14px; color: #fffdf6; text-decoration: none; }
+@media (max-width: 600px) {
+  .guided-tour { padding: 12px 14px; }
+  .guided-tour h2 { font-size: 20px; }
+  .guided-tour p { font-size: 12px; margin-bottom: 8px; }
+}

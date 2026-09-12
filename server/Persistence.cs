@@ -75,6 +75,7 @@ public class UserPreferences
 }
 public class ImportRecord
 {
+    public string ParserVersion { get; set; } = "unknown";
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public Guid UserId { get; set; }
     public string PatternId { get; set; } = "";
@@ -124,10 +125,21 @@ public class StitchDbContext(DbContextOptions<StitchDbContext> options)
     public DbSet<BackupArtifact> Backups => Set<BackupArtifact>();
     public DbSet<BackupJob> BackupJobs => Set<BackupJob>();
     public DbSet<PendingObjectDeletion> PendingObjectDeletions => Set<PendingObjectDeletion>();
+    public DbSet<LegalDocument> LegalDocuments => Set<LegalDocument>();
+    public DbSet<LegalVersion> LegalVersions => Set<LegalVersion>();
+    public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+        BetaSchema.Configure(b);
+        b.Entity<LegalDocument>().HasKey(d => d.Slug);
+        b.Entity<LegalDocument>().Property(d => d.DraftRevision).IsConcurrencyToken();
+        b.Entity<LegalVersion>().HasIndex(v => new { v.DocumentSlug, v.Version }).IsUnique();
+        b.Entity<LegalVersion>().HasOne<LegalDocument>().WithMany().HasForeignKey(v => v.DocumentSlug).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<LegalAcceptance>().HasKey(a => new { a.UserId, a.VersionId });
+        b.Entity<LegalAcceptance>().HasOne<ApplicationUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<LegalAcceptance>().HasOne<LegalVersion>().WithMany().HasForeignKey(a => a.VersionId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<OwnedPattern>().HasAlternateKey(x => new { x.UserId, x.Id });
         b.Entity<OwnedPattern>().Property(x => x.DataJson).HasColumnType("jsonb");
         b.Entity<OwnedPattern>().HasOne<PatternSourceAsset>().WithMany().HasForeignKey(x => new { x.UserId, x.AssetId }).HasPrincipalKey(x => new { x.UserId, x.Id }).OnDelete(DeleteBehavior.Restrict);

@@ -20,6 +20,18 @@ var db = scope.ServiceProvider.GetRequiredService<StitchDbContext>();
 db.Database.Migrate(); db.SeedCatalog();
 var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = Guid.NewGuid().ToString("N"), DisplayName = "Browser tester", Email = "browser@example.test", SecurityStamp = Guid.NewGuid().ToString("N") };
 db.Users.Add(user); db.SaveChanges();
+if (Environment.GetEnvironmentVariable("STITCH_TEST_BETA_ADMIN") == "true")
+{
+    var role = db.Roles.SingleOrDefault(r => r.NormalizedName == "BETAADMIN");
+    if (role is null) { role = new IdentityRole<Guid>(BetaService.AdminRole) { Id = Guid.NewGuid(), NormalizedName = "BETAADMIN" }; db.Roles.Add(role); }
+    db.UserRoles.Add(new() { UserId = user.Id, RoleId = role.Id }); db.SaveChanges();
+}
+if (Environment.GetEnvironmentVariable("STITCH_TEST_LEGAL_EDITOR") == "true")
+{
+    var role = db.Roles.SingleOrDefault(r => r.NormalizedName == "LEGALEDITOR");
+    if (role is null) { role = new IdentityRole<Guid>(LegalDocumentService.EditorRole) { Id = Guid.NewGuid(), NormalizedName = "LEGALEDITOR" }; db.Roles.Add(role); }
+    db.UserRoles.Add(new() { UserId = user.Id, RoleId = role.Id }); db.SaveChanges();
+}
 var protector = provider.GetRequiredService<IDataProtectionProvider>().CreateProtector("Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationMiddleware", IdentityConstants.ApplicationScheme, "v2");
 var principal = new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.NameIdentifier, user.Id.ToString()), new(ClaimTypes.Name, user.UserName), new("AspNet.Identity.SecurityStamp", user.SecurityStamp)], IdentityConstants.ApplicationScheme));
 var ticket = new AuthenticationTicket(principal, new AuthenticationProperties { IsPersistent = true, IssuedUtc = DateTimeOffset.UtcNow, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(1) }, IdentityConstants.ApplicationScheme);

@@ -96,6 +96,6 @@ export function LandingPage({ error }: { error: string }) {
         <span className="landing-invitation-note">Sign in securely with your Google account.</span>
       </section>
     </main>
-    <footer className="landing-footer"><a className="landing-footer-brand" href="#top"><Spool size={19}/> Stitch Helper</a><p>A little time for something you love.</p><a href="/data-retention">Data retention &amp; deletion</a><a href="/auth/google">Log in <ArrowRight size={14}/></a></footer>
+    <footer className="landing-footer"><a className="landing-footer-brand" href="#top"><Spool size={19}/> Stitch Helper</a><p>A little time for something you love.</p><a href="/legal/terms-of-service">Terms of Service</a><a href="/legal/privacy-policy">Privacy Policy</a><a href="/legal">All legal documents</a><a href="/data-retention">Data retention &amp; deletion</a><a href="/auth/google">Log in <ArrowRight size={14}/></a></footer>
   </div>;
 }

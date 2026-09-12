@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StitchHelper;
@@ -11,9 +12,11 @@ using StitchHelper;
 namespace StitchHelper.Migrations
 {
     [DbContext(typeof(StitchDbContext))]
-    partial class StitchDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912062607_BetaExperienceFeedback")]
+    partial class BetaExperienceFeedback
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

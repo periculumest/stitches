@@ -10,6 +10,15 @@ test('retention policy is public and explains deletion and backup expiry', async
 
 test('account deletion requires an explicit typed confirmation', async ({ page }) => {
   await page.goto('/');
+  const accountMenu = page.getByRole('button', { name: /^Account menu for / });
+  await accountMenu.click();
+  await page.keyboard.press('Escape');
+  await expect(accountMenu).toBeFocused();
+  await expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(accountMenu).toBeVisible();
+  await accountMenu.click();
+  await expect(page.getByRole('group', { name: 'Account actions' })).toBeInViewport();
   await page.getByRole('button', { name: 'Account & data', exact: true }).click();
   const dialog = page.getByRole('dialog');
   const remove = dialog.getByRole('button', { name: 'Delete my account' });

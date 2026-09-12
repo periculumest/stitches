@@ -39,6 +39,10 @@ builder.Services.AddScoped<IRepository, Repository>();
 builder.Services.AddSingleton<IPatternImporter, PdfImporter>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<RetentionService>();
+builder.Services.AddScoped<LegalDocumentService>();
+var betaOptions = new BetaOptions(); configuration.GetSection("Beta").Bind(betaOptions); betaOptions.Validate();
+builder.Services.AddSingleton(betaOptions);
+builder.Services.AddScoped<BetaService>();
 builder.Services.AddHostedService<RetentionWorker>();
 builder.Services.AddScoped<GoogleIdentityResolver>();
 builder.Services.AddIdentity<ApplicationUser, IdentityRole<Guid>>(o => { o.User.RequireUniqueEmail = false; })
@@ -96,6 +100,49 @@ else if (storage == "GoogleCloudStorage")
 else throw new InvalidOperationException("Production requires Storage:Provider=GoogleCloudStorage and durable private buckets. Local storage is Development/Testing only.");
 builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o => o.SerializerOptions.PropertyNamingPolicy = Json.Options.PropertyNamingPolicy);
 var app = builder.Build();
+if (args.Contains("--beta-admin") || args.Contains("--remove-beta-admin"))
+{
+    var remove = args.Contains("--remove-beta-admin");
+    var identifier = args.ElementAtOrDefault(Array.IndexOf(args, remove ? "--remove-beta-admin" : "--beta-admin") + 1);
+    if (!Guid.TryParse(identifier, out var id)) throw new InvalidOperationException("Specify an existing internal account GUID.");
+    using var scope = app.Services.CreateScope();
+    var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+    var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+    var user = await users.FindByIdAsync(id.ToString()) ?? throw new InvalidOperationException("Account does not exist.");
+    if (!await roles.RoleExistsAsync(BetaService.AdminRole))
+        if (!(await roles.CreateAsync(new IdentityRole<Guid>(BetaService.AdminRole))).Succeeded) throw new InvalidOperationException("Could not create administrator role.");
+    if (await users.IsInRoleAsync(user, BetaService.AdminRole) != !remove)
+    {
+        var result = remove ? await users.RemoveFromRoleAsync(user, BetaService.AdminRole) : await users.AddToRoleAsync(user, BetaService.AdminRole);
+        if (!result.Succeeded) throw new InvalidOperationException("Could not update administrator role.");
+    }
+    Console.WriteLine($"Beta administrator access {(remove ? "removed" : "assigned")} for {id}."); return;
+}
+if (args.Contains("--legal-editor") || args.Contains("--remove-legal-editor"))
+{
+    var remove = args.Contains("--remove-legal-editor");
+    var identifier = args.ElementAtOrDefault(Array.IndexOf(args, remove ? "--remove-legal-editor" : "--legal-editor") + 1);
+    if (string.IsNullOrWhiteSpace(identifier)) throw new InvalidOperationException("Specify an existing account ID or exact email address.");
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<StitchDbContext>();
+    var byId = Guid.TryParse(identifier, out var id); var email = identifier.ToUpperInvariant();
+    var matches = await db.Users.Where(u => byId ? u.Id == id : u.NormalizedEmail == email).ToListAsync();
+    if (matches.Count != 1) throw new InvalidOperationException("Expected exactly one existing account. Use an account ID if the email is shared.");
+    var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+    if (!await roles.RoleExistsAsync(LegalDocumentService.EditorRole))
+    {
+        var created = await roles.CreateAsync(new IdentityRole<Guid>(LegalDocumentService.EditorRole));
+        if (!created.Succeeded) throw new InvalidOperationException("Could not create editor role.");
+    }
+    var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+    var assigned = await users.IsInRoleAsync(matches[0], LegalDocumentService.EditorRole);
+    if (assigned != !remove)
+    {
+        var changed = remove ? await users.RemoveFromRoleAsync(matches[0], LegalDocumentService.EditorRole) : await users.AddToRoleAsync(matches[0], LegalDocumentService.EditorRole);
+        if (!changed.Succeeded) throw new InvalidOperationException("Could not update editor access.");
+    }
+    Console.WriteLine($"Legal editor access {(remove ? "removed" : "assigned")} for account {matches[0].Id}."); return;
+}
 if (storage == "GoogleCloudStorage")
 {
     var client = app.Services.GetRequiredService<StorageClient>();
@@ -142,13 +189,16 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Frame-Options"] = "DENY";
     if (!local) context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000";
     if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")) context.Response.Headers.CacheControl = "no-store";
-    try { await next(); }
+    try
+    {
+        await next();
+        if (context.Request.Path.StartsWithSegments("/api") && context.Response.StatusCode >= 400 && !context.Response.HasStarted && context.Response.ContentType is null)
+            await BetaErrors.Write(context, context.Response.StatusCode);
+    }
     catch (Exception ex) when (!context.Response.HasStarted)
     {
         var status = ex is UserError error ? error.Status : ex is AntiforgeryValidationException ? 400 : ex is DbUpdateConcurrencyException ? 409 : ex is BadHttpRequestException ? 400 : 500;
-        if (status == 500) app.Logger.LogError(ex, "Request {TraceId} failed", context.TraceIdentifier);
-        context.Response.StatusCode = status;
-        await context.Response.WriteAsJsonAsync(new { error = status == 500 ? "Something went wrong. Your last saved work is safe. Please try again." : ex is AntiforgeryValidationException ? "Your session verification expired. Reload and try again." : ex is DbUpdateConcurrencyException ? Repository.Conflict().Message : ex.Message });
+        await BetaErrors.Write(context, status, ex is UserError ? ex.Message : ex is AntiforgeryValidationException ? "Your session verification expired. Reload and try again." : null);
     }
 });
 app.UseDefaultFiles(); app.UseStaticFiles();
@@ -169,11 +219,23 @@ app.Use(async (context, next) =>
         (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/auth")))
     {
         if (context.User.Identity?.IsAuthenticated != true) { context.Response.StatusCode = 401; return; }
+        if (context.Request.Headers.TryGetValue("X-Account-Id", out var expectedAccount) && expectedAccount != context.RequestServices.GetRequiredService<ICurrentUserContext>().UserId.ToString())
+            throw new UserError("A different account is signed in. Return to the original account before retrying work from this tab.", 409);
         await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
+    }
+    if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api") && context.Request.Path != "/api/beta/public" && !LegalEndpoints.ExemptFromAcceptance(context.Request))
+    {
+        var user = context.RequestServices.GetRequiredService<ICurrentUserContext>();
+        if (context.Request.Path != "/api/beta/state" && context.Request.Path != "/api/beta/public")
+            await context.RequestServices.GetRequiredService<BetaService>().RequireAccess(user.UserId);
+        if (await context.RequestServices.GetRequiredService<LegalDocumentService>().HasPending(user.UserId, context.RequestAborted))
+            throw new UserError("Review and accept the updated legal documents to continue. Your saved work remains available after acceptance.", 428);
     }
     await next();
 });
 app.MapStitchAuthentication();
+app.MapLegalDocuments();
+app.MapBeta();
 app.MapGet("/health/live", () => new { status = "live" }).AllowAnonymous();
 app.MapGet("/health/ready", async (StitchDbContext db) =>
 {

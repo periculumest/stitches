@@ -90,7 +90,7 @@ public class Repository(StitchDbContext db, ICurrentUserContext current) : IRepo
             else if (pattern.SourceFile is not null && !db.Assets.Any(a => a.Id == pattern.SourceFile && a.UserId == Owner)) throw Missing();
             ThreadCatalog.Normalize(pattern.Data);
             db.Patterns.Add(new() { Id = pattern.Id, UserId = Owner, Name = pattern.Name, AssetId = pattern.SourceFile, DataJson = Json.Write(pattern.Data) });
-            if (imported) db.Imports.Add(new() { UserId = Owner, PatternId = pattern.Id, Status = pattern.Data.Stitches.Count == 0 ? "unreadable" : "review" });
+            if (imported) db.Imports.Add(new() { UserId = Owner, PatternId = pattern.Id, Status = pattern.Data.Stitches.Count == 0 ? "unreadable" : "review", ParserVersion = typeof(PdfImporter).Assembly.GetName().Version?.ToString() ?? "unknown" });
         }
         else pattern = GetPattern(pattern.Id);
         var project = new Project { PatternId = pattern.Id, Name = name ?? pattern.Name, Status = status, Data = Json.Copy(pattern.Data) };

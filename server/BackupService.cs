@@ -41,6 +41,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
         var imports = await db.Imports.AsNoTracking().Where(x => x.UserId == owner).ToListAsync(ct);
         var ownedAssets = await db.Assets.AsNoTracking().Where(x => x.UserId == owner).ToListAsync(ct);
         var catalog = await db.Catalog.AsNoTracking().Select(x => x.Json).ToListAsync(ct);
+        var legalAcceptances = await new LegalDocumentService(db).History(owner, ct);
         await tx.CommitAsync(ct);
         var chartData = patterns.Select(x => Json.Read<PatternData>(x.DataJson)).Concat(projects.Select(x => Json.Read<PatternData>(x.DataJson))).ToList();
         var states = projects.Select(x => Json.Read<Project>(x.StateJson)).ToList();
@@ -69,6 +70,7 @@ public sealed class BackupService(StitchDbContext db, IPatternAssetStore assets,
                     files["data/" + name + ".json"] = StorageKeys.Hash(bytes); sections[name] = values.Length;
                 }
                 Section("patterns", patterns.Select(x => new { x.Id, x.Name, x.AssetId, x.CreatedAt, data = Json.Read<PatternData>(x.DataJson) }).ToArray());
+                Section("legal-acceptances", legalAcceptances.ToArray());
                 Section("projects", projects.Select(x => new { x.Id, x.PatternId, x.Revision, x.DataRevision, x.UpdatedAt, data = Json.Read<PatternData>(x.DataJson), metadata = Json.Read<System.Text.Json.JsonElement>(x.StateJson) }).ToArray());
                 Section("project-progress", progress.Select(x => new { x.ProjectId, x.StitchId, state = "complete", x.UpdatedAt }).ToArray());
                 Section("inventory", inventory.Select(x => new { x.Code, x.BobbinCount, x.Location, x.Revision }).ToArray());

@@ -16,23 +16,36 @@ export const typeName = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2
 export const count = (n: number) => n.toLocaleString();
 export const percentage = (done: number, total: number) => total ? done / total * 100 : 0;
 let csrf: Promise<string> | null = null;
-export class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
+let sessionUserId: string | null = null;
+export function setSessionIdentity(id: string) { sessionUserId = id; }
+export interface ErrorDetails { code: string; referenceId: string; errorToken?: string; appVersion?: string }
+export let recentError: ErrorDetails | undefined;
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public details: ErrorDetails = { code: status === 0 ? 'NETWORK_FAILURE' : 'REQUEST_FAILED', referenceId: `client-${crypto.randomUUID()}` }) {
+    super(`${message} Code: ${details.code}. Reference: ${details.referenceId}.`);
+    recentError = details;
+  }
+}
 export function resetSession() { csrf = null; }
 export async function request(path: string, method = 'GET', body?: unknown): Promise<Response> {
   const headers: Record<string, string> = body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {};
   if (!['GET', 'HEAD'].includes(method)) {
+    if (sessionUserId) headers['X-Account-Id'] = sessionUserId;
     csrf ??= fetch('/api/antiforgery', { credentials: 'same-origin' }).then(async response => {
       if (!response.ok) { csrf = null; if (response.status === 401) window.dispatchEvent(new Event('session-expired')); throw new ApiError('Sign in again to save your work.', response.status); }
       return (await response.json()).token;
-    }).catch(error => { csrf = null; throw error; });
+    }).catch(error => { csrf = null; throw error instanceof ApiError ? error : new ApiError('Disconnected. Keep this tab open and retry when connected.', 0); });
     headers['X-CSRF-TOKEN'] = await csrf;
   }
-  const response = await fetch(path, { method, credentials: 'same-origin', headers, body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined });
+  let response: Response;
+  try { response = await fetch(path, { method, credentials: 'same-origin', headers, body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined }); }
+  catch { throw new ApiError('Disconnected. Keep this tab open, check your connection, and retry. This client reference does not identify a server log.', 0); }
   if (!response.ok) {
+    if (response.status === 428) window.dispatchEvent(new Event('legal-acceptance-required'));
     if (response.status === 401) { resetSession(); if (path !== '/api/me') window.dispatchEvent(new Event('session-expired')); }
     if (response.status === 400) resetSession();
     const data = await response.json().catch(() => null);
-    throw new ApiError(data?.error || (response.status === 401 ? 'Your session expired. Sign in again.' : `Request failed (${response.status}). Please try again.`), response.status);
+    throw new ApiError(data?.error || (response.status === 401 ? 'Your session expired. Sign in again.' : `Request failed (${response.status}). Please try again.`), response.status, data?.code && data?.referenceId ? data : undefined);
   }
   return response;
 }

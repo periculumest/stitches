@@ -76,8 +76,10 @@ test('slow progress saves keep controls steady, accept more strokes, and finish 
     await Promise.all([page.waitForRequest(`**/api/projects/${p.id}/progress`), page.mouse.click(first.x, first.y)]);
     await expect(page.locator('.save-status')).toContainText('Saving');
     for (const label of ['Inspect', 'Pan', 'Paint complete', 'Paint incomplete', 'Working area', 'Edit stitches', 'Back to projects', 'Sign out']) {
+      if (label === 'Sign out') await page.getByRole('button', { name: /Account menu for/ }).click();
       const button = page.getByRole('button', { name: label, exact: true });
       await expect(button).toBeEnabled(); await expect(button).toHaveCSS('opacity', '1');
+      if (label === 'Sign out') await page.keyboard.press('Escape');
     }
     await page.getByRole('button', { name: 'Pan', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Pan', exact: true })).toHaveAttribute('aria-pressed', 'true');

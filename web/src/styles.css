@@ -40,4 +40,17 @@
 .signin-card [role=alert] { color: #933d32; }
 .component-editor { padding: 12px; margin-bottom: 12px; background: #f4f1e9; border-radius: 10px; }
 .component-editor .field-label { margin: 0 0 8px; }
-.local-status small { overflow-wrap: anywhere; }
+.account-menu { position: relative; padding-top: 16px; border-top: 1px solid var(--line); }
+.account-trigger { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; padding: 3px; border-radius: 10px; text-align: left; }
+.account-trigger:hover { background: #385b4608; }
+.account-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--green-dark); }
+.account-avatar { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--green); color: white; font-size: 19px; font-weight: 600; border: 1px solid var(--green-dark); }
+.account-trigger[aria-expanded=true] .account-avatar { box-shadow: 0 0 0 4px #385b461a; }
+.account-menu-panel { position: absolute; bottom: calc(100% + 10px); left: 0; width: min(280px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: #fffefa; box-shadow: 0 12px 36px #263c2e26; }
+.account-menu-identity { padding: 8px 8px 14px; margin-bottom: 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.account-menu-identity strong { display: block; font-size: 14px; }
+.account-menu-identity small { display: block; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.account-menu-action { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--cream); font-size: 13px; }
+.account-menu-action + .account-menu-action { margin-top: 8px; }
+.account-menu-action:hover:not(:disabled) { background: var(--soft); }
+@media(max-width:1000px) { .account-menu { margin-top: auto; } .account-trigger { justify-content: center; gap: 0; } .account-trigger-name { display: none; } }

@@ -1,0 +1,54 @@
+.app-notice {
+  --notice-ink: #45604c; --notice-tint: #e9efe3; --notice-border: #dce4d5;
+  display: flex; align-items: flex-start; gap: 14px; padding: 19px 21px;
+  color: #3f493b; background: #fffefa; border: 1px solid var(--notice-border);
+  border-radius: 13px; box-shadow: 0 3px 12px #34472e05; min-width: 0;
+}
+.app-notice-warning { --notice-ink: #896326; --notice-tint: #f6edd8; --notice-border: #e9ddbe; }
+.app-notice-error { --notice-ink: #984f3f; --notice-tint: #f8e8e1; --notice-border: #e8d2c7; }
+.app-notice-success { --notice-ink: #436347; --notice-tint: #e7efdf; --notice-border: #d3dfc7; }
+.app-notice .app-notice-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--notice-tint); color: var(--notice-ink); flex-shrink: 0; }
+.app-notice-content { flex: 1; min-width: 0; }
+.app-notice h3 { margin: 0 0 5px; font: 600 14px/1.5 'Segoe UI', sans-serif; letter-spacing: 0; color: var(--notice-ink); }
+.app-notice-message { font-size: 13px; line-height: 1.65; color: #707767; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-notice .app-notice-eyebrow { display: block; color: #7c886f; font-size: 9px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+.app-notice .app-notice-close { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; color: #7e8775; border-radius: 8px; margin: -5px -7px 0 0; padding: 0; }
+.app-notice .app-notice-close:hover:enabled { background: var(--notice-tint); }
+.app-notice .app-notice-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+.app-notice-actions button, .app-notice-actions a { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--notice-border); border-radius: 7px; font-size: 12px; line-height: 1.4; font-weight: 600; color: var(--notice-ink); background: #fffefa; text-decoration: none; white-space: normal; }
+.app-notice-actions .notice-action-primary { background: var(--notice-ink); color: #fffefa; border-color: var(--notice-ink); }
+.app-notice-actions .notice-action-quiet { border-color: transparent; background: transparent; font-weight: 400; }
+.app-notice .app-notice-details { margin: 9px 0 0; padding: 0; border: 0; }
+.app-notice-details summary { font-size: 11px; color: #7c8074; cursor: pointer; width: fit-content; padding: 4px 0; }
+.app-notice-details p { padding: 10px 12px; margin: 5px 0 0; border-radius: 6px; background: #f4f4ed; font: 11px/1.7 ui-monospace, Consolas, monospace; color: #727665; overflow-wrap: anywhere; }
+.app-notice button:focus-visible, .app-notice a:focus-visible, .app-notice summary:focus-visible { outline: 3px solid #859d78; outline-offset: 3px; }
+.app-notice.error-banner, .app-notice.beta-service-error { position: relative; inset: auto; z-index: auto; max-width: none; margin: 16px 26px 0; }
+.app-notice.beta-announcement { position: relative; z-index: auto; width: auto; margin: 18px 26px; background: linear-gradient(110deg, #f1f5eb, #fcfcf6); align-items: flex-start; flex-wrap: nowrap; }
+.app-notice.beta-announcement h3 { font-family: var(--serif); font-size: 21px; font-weight: 400; }
+.success-notification { position: fixed; top: 88px; right: 24px; width: min(390px, calc(100vw - 110px)); z-index: 55; }
+.success-notification .app-notice { box-shadow: 0 12px 40px #31452f20; background: #fcfdf7; }
+.beta-tools.beta-toolbar { padding: 9px 20px; gap: 5px; background: #fcfcf7f5; backdrop-filter: blur(12px); border-top: 1px solid #dfe5d6; box-shadow: 0 -3px 15px #35472d04; }
+.beta-toolbar .beta-version { display: flex; align-items: center; gap: 7px; padding: 0 13px 0 0; margin-right: 4px; color: #879079; font-size: 10px; }
+.beta-version b { border: 1px solid #dce3d2; border-radius: 5px; padding: 3px 6px; color: #697e58; font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: .07em; }
+.beta-version small { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.beta-tools.beta-toolbar button, .beta-tools.beta-toolbar a { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; border-radius: 6px; font-size: 11px; text-decoration: none; color: #6c7b5f; }
+.beta-toolbar button:hover, .beta-toolbar a:hover { background: #eaf0e1; }
+.beta-toolbar button[data-tour=feedback] { background: #eaf0e1; color: #45603f; font-weight: 600; }
+.beta-toolbar svg { flex-shrink: 0; }
+@media (max-width: 680px) {
+  .app-notice { padding: 15px; gap: 10px; border-radius: 11px; }
+  .app-notice .app-notice-icon { width: 30px; height: 32px; border-radius: 8px; }
+  .app-notice h3 { font-size: 13px; }
+  .app-notice-message { font-size: 12px; }
+  .app-notice.error-banner, .app-notice.beta-service-error { margin: 12px 12px 0; }
+  .app-notice.beta-announcement { margin: 12px; }
+  .app-notice.beta-announcement h3 { font-size: 19px; }
+  .app-notice.beta-announcement .app-notice-icon { display: none; }
+  .app-notice-actions button, .app-notice-actions a { min-height: 40px; }
+  .success-notification { right: 12px; top: 80px; width: calc(100vw - 92px); }
+  .beta-tools.beta-toolbar { padding: 8px; gap: 3px; }
+  .beta-toolbar .beta-version { flex-basis: 100%; justify-content: center; max-width: none; padding: 0; margin: 0 0 3px; }
+  .beta-tools.beta-toolbar button, .beta-tools.beta-toolbar a { font-size: 10px; padding: 7px; }
+  .beta-toolbar svg { width: 13px; height: 13px; }
+}
+body:has(.workspace.is-focused) .success-notification { width: min(390px, calc(100vw - 24px)); }

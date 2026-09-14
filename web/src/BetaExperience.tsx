@@ -1,6 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowUpRight, Compass, MessageSquare, ShieldCheck, Sparkles } from 'lucide-react';
 import { api, ApiError, recentError, type ErrorDetails, type Project } from './types';
 import { GuidedTour } from './GuidedTour';
+import { Notification } from './Notifications';
 import './beta.css';
 
 export interface BetaState { appVersion: string; supportContact: string; messageMinLength: number; messageMaxLength: number; screenshotCount: number; screenshotMaxBytes: number; screenshotMaxPixels: number; disclosureVersion: number; onboardingVersion: number; completedOnboardingVersion: number; hasAccess: boolean; isAdmin: boolean }
@@ -73,15 +75,58 @@ export function FeedbackForm({ state, route, projectId, errorDetails, close }: {
 export function BetaTools({ route, project, importOpen, savePending, saveError, openImport }: { route: string; project: Project | null; importOpen: boolean; savePending: boolean; saveError: boolean; openImport: () => void }) {
   const state = useContext(BetaContext)!;
   const [form, setForm] = useState<{ projectId?: string; errorDetails?: ErrorDetails } | null>(null), [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const [tourRun, setTourRun] = useState(0), [tour, setTour] = useState(state.completedOnboardingVersion < state.onboardingVersion), [error, setError] = useState('');
+  const [tourRun, setTourRun] = useState(0), [tour, setTour] = useState(state.completedOnboardingVersion < state.onboardingVersion);
+  type ServiceOperation = 'announcementLoad' | 'announcementDismiss' | 'tourSave';
+  const [issues, setIssues] = useState<Partial<Record<ServiceOperation, string>>>({});
+  const [pending, setPending] = useState<Partial<Record<ServiceOperation, boolean>>>({});
+  const active = useRef(new Set<ServiceOperation>()), announcementGeneration = useRef(0), dismissalTarget = useRef<string | null>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const clearIssue = (operation: ServiceOperation) => setIssues(current => ({ ...current, [operation]: undefined }));
+  const perform = useCallback(async (operation: ServiceOperation, action: () => Promise<void>) => {
+    if (active.current.has(operation)) return;
+    active.current.add(operation); setPending(current => ({ ...current, [operation]: true }));
+    try { await action(); setIssues(current => ({ ...current, [operation]: undefined })); }
+    catch (error) { setIssues(current => ({ ...current, [operation]: error instanceof Error ? error.message : 'Please try again.' })); }
+    finally { active.current.delete(operation); setPending(current => ({ ...current, [operation]: false })); }
+  }, []);
+  const loadAnnouncement = useCallback(() => perform('announcementLoad', async () => {
+    if (active.current.has('announcementDismiss')) return;
+    const generation = announcementGeneration.current;
+    try {
+      const next = await api<Announcement | null>('/beta/announcement');
+      if (generation === announcementGeneration.current) setAnnouncement(next);
+    } catch (error) { if (generation === announcementGeneration.current) throw error; }
+  }), [perform]);
+  const dismissAnnouncement = (id: string) => perform('announcementDismiss', async () => {
+    dismissalTarget.current = id; announcementGeneration.current++;
+    await api(`/beta/announcements/${id}/dismiss`, 'POST');
+    setAnnouncement(current => current?.id === id ? null : current);
+  });
+  const saveTourPreference = () => perform('tourSave', async () => { await api('/beta/onboarding', 'POST', { version: state.onboardingVersion }); });
+  const finish = () => { setTour(false); void saveTourPreference(); };
   useEffect(() => { const report = () => setForm({ errorDetails: recentError }); window.addEventListener('open-feedback', report); return () => window.removeEventListener('open-feedback', report); }, []);
-  useEffect(() => { const load = () => api<Announcement | null>('/beta/announcement').then(setAnnouncement).catch(e => setError(e.message)); void load(); const timer = setInterval(load, 60000); return () => clearInterval(timer); }, []);
-  const finish = async () => { setTour(false); try { await api('/beta/onboarding', 'POST', { version: state.onboardingVersion }); } catch (e) { setError(`${(e as Error).message} Tour dismissal was not saved. Use Dismiss tour again to retry.`); } };
+  useEffect(() => { void loadAnnouncement(); const timer = setInterval(() => { void loadAnnouncement(); }, 60000); return () => clearInterval(timer); }, [loadAnnouncement]);
+  useEffect(() => {
+    const element = toolbar.current!, shell = element.closest<HTMLElement>('.main-shell')!;
+    const update = () => { shell.style.paddingBottom = `${element.getBoundingClientRect().height + 12}px`; };
+    const observer = new ResizeObserver(update); observer.observe(element); update();
+    return () => { observer.disconnect(); shell.style.removeProperty('padding-bottom'); };
+  }, []);
   return <>
-    {announcement && <aside className="beta-announcement" aria-label="Beta announcement"><strong>{announcement.title}</strong><span>{announcement.message}</span>{announcement.linkUrl && <a href={announcement.linkUrl} target={announcement.linkUrl.startsWith('https://') ? '_blank' : undefined} rel="noopener noreferrer">{announcement.linkText}</a>}{announcement.dismissible && <button aria-label="Dismiss announcement" onClick={() => { api(`/beta/announcements/${announcement.id}/dismiss`, 'POST').then(() => setAnnouncement(null)).catch(e => setError(e.message)); }}>Dismiss</button>}</aside>}
-    <div className="beta-tools"><span>Beta · {state.appVersion}</span><button data-tour="feedback" onClick={() => setForm({ errorDetails: recentError })}>Send Feedback</button>{route === 'workspace' && project && <button onClick={() => setForm({ projectId: project.id, errorDetails: recentError })}>Report a problem with this pattern</button>}<a href="/whats-new">What's New</a>{state.isAdmin && <a href="/admin/beta">Beta administration</a>}<button onClick={() => { setTour(true); setTourRun(n => n + 1); }}>Guided tour</button></div>
+    {announcement && <Notification title={announcement.title} className="beta-announcement" announcement
+      close={announcement.dismissible ? () => { void dismissAnnouncement(announcement.id); } : undefined} closeLabel="Dismiss announcement" busy={pending.announcementDismiss}
+      actions={announcement.linkUrl && <a href={announcement.linkUrl} target={announcement.linkUrl.startsWith('https://') ? '_blank' : undefined} rel="noopener noreferrer">{announcement.linkText}<ArrowUpRight size={14} aria-hidden="true" /></a>}>{announcement.message}</Notification>}
+    <div ref={toolbar} className="beta-tools beta-toolbar"><span className="beta-version" title={state.appVersion}><b>Beta</b><small>{state.appVersion}</small></span><button data-tour="feedback" onClick={() => setForm({ errorDetails: recentError })}><MessageSquare size={14} aria-hidden="true" />Send Feedback</button>{route === 'workspace' && project && <button onClick={() => setForm({ projectId: project.id, errorDetails: recentError })}>Report a problem with this pattern</button>}<a href="/whats-new"><Sparkles size={14} aria-hidden="true" />What's New</a>{state.isAdmin && <a href="/admin/beta"><ShieldCheck size={14} aria-hidden="true" />Beta administration</a>}<button onClick={() => { setTour(true); setTourRun(n => n + 1); }}><Compass size={14} aria-hidden="true" />Guided tour</button></div>
     {tour && <GuidedTour key={tourRun} route={route} project={project} importOpen={importOpen} savePending={savePending} saveError={saveError} openImport={openImport} finish={finish}/>}
-    {error && <div className="beta-service-error" role="alert">{error}<button onClick={() => { void finish(); setError(''); }}>Dismiss tour again</button><button onClick={() => setError('')}>Dismiss message</button></div>}
+    {issues.announcementLoad && <Notification title="Updates are temporarily unavailable" tone="warning" className="beta-service-error" details={issues.announcementLoad}
+      close={() => clearIssue('announcementLoad')} busy={pending.announcementLoad}
+      actions={<button className="notice-action-primary" disabled={pending.announcementLoad} onClick={() => { void loadAnnouncement(); }}>{pending.announcementLoad ? 'Checking…' : 'Retry updates'}</button>}>We couldn’t check for announcements. You can keep using your workspace.</Notification>}
+    {issues.announcementDismiss && <Notification title="This announcement couldn’t be hidden" tone="warning" className="beta-service-error" details={issues.announcementDismiss}
+      close={() => clearIssue('announcementDismiss')} busy={pending.announcementDismiss}
+      actions={<button className="notice-action-primary" disabled={pending.announcementDismiss} onClick={() => { if (dismissalTarget.current) void dismissAnnouncement(dismissalTarget.current); }}>{pending.announcementDismiss ? 'Saving…' : 'Retry dismissal'}</button>}>Your preference hasn’t been saved. Try again when your connection is back.</Notification>}
+    {issues.tourSave && <Notification title="Tour preference wasn’t saved" tone="warning" className="beta-service-error" details={issues.tourSave}
+      close={() => clearIssue('tourSave')} busy={pending.tourSave}
+      actions={<button className="notice-action-primary" disabled={pending.tourSave} onClick={() => { void saveTourPreference(); }}>{pending.tourSave ? 'Saving…' : 'Save tour preference'}</button>}>The tour is closed for now. Save your preference to keep it from appearing on your next visit.</Notification>}
     {form && <FeedbackForm state={state} route={route} {...form} close={() => setForm(null)}/>}
   </>;
 }
